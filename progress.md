@@ -28,3 +28,18 @@ Deadline: submissions due 2026-10-12 (verified colosseum.com/worldsfair).
 - [ ] 4 server + maker + settler
 - [ ] 5 web UI, deployed /hourly, screenshot-verified
 - [ ] 6 submission kit: README, GTM, pitch + demo scripts
+
+## Checkpoint 2026-10-04 ~17:00 UTC
+- [x] 1 program + tests: 7 tests pass (exact error codes). Commits 027c09a, 23b9c56.
+- Oracle settlement: settle_oracle verifies a Switchboard On-Demand quote (pinned devnet queue
+  EYiAmGSdsQTuCw413V5BzaruWuCCSDgTPtBGvLkXHbe7, owner Aio4gaXjXzJNVLtzwtNVmSqGKpANtXhybbkhtAC94ji2),
+  feed hash stored per series. Trusted settler = fallback after 72h.
+- LIVE-VERIFIED: Switchboard crossbar simulate reads Ornn; MEAN over OR-of-timestamps filter
+  matches local mean exactly (Sep H100 2.829333, 30 days, with 20:00 and 21:00 stamps).
+- LIVE-VERIFIED: devnet oracle signed a quote for a custom Ornn feed (fetchQuoteIx -> Ed25519 ix).
+- crossbar.switchboard.xyz has NO DNS record (checked 8.8.8.8); use https://crossbar.switchboardlabs.xyz.
+  Crossbar returns transient 502s: keeper must retry.
+- BLOCKED: devnet SOL. Faucet rate-limits this VM. Asked Mehdi for ~6 SOL to admin
+  G9A1tg5zgxMZg4EsoeBt8Yi5hEfwXsAEiu8zEqcAMxMT. Keys in ~/compute-options/keys (gitignored).
+- Build gotchas: anchor-spl needs token_2022 + token_2022_extensions features; Box large accounts
+  (stack overflow in fill); pin solana-program to 3.0.0 (cargo update --precise); getrandom custom stub.

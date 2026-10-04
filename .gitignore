@@ -3,3 +3,5 @@ node_modules/
 program/target/
 *.log
 .env
+app/state/
+app/sbquote.mjs

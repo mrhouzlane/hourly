@@ -1,18 +1,20 @@
 import * as sb from "@switchboard-xyz/on-demand";
 import { CrossbarClient } from "@switchboard-xyz/common";
-const URL = "https://ornn-backend-api-135941626504.us-central1.run.app/api/gpu/H100%20SXM/index-history";
-const cb = new CrossbarClient('https://crossbar.switchboardlabs.xyz', true);
-cb.setNetwork?.("devnet");
-const feed = { name: "OCPI H100 Oct2-3 mean", minJobResponses: 1, minOracleSamples: 1, maxJobRangePct: 0,
-  jobs: [{ tasks: [{ httpTask: { url: URL } }, { jsonParseTask: { path: "$.data[?(@.timestamp == '2026-10-02T20:00:00.000Z' || @.timestamp == '2026-10-03T20:00:00.000Z')].index_value", aggregationMethod: 4 } }] }] };
-console.log("devnet PID", sb.ON_DEMAND_DEVNET_PID.toBase58(), "queue", sb.ON_DEMAND_DEVNET_QUEUE.toBase58());
+import { createRequire } from "module";
+const require = createRequire(import.meta.url);
+const ornn = require("./engine/ornn.js");
+const cb = new CrossbarClient('https://crossbar.switchboardlabs.xyz', false);
+const feed = ornn.oracleFeed("H100_SXM", ["2026-10-02", "2026-10-03"]);
+const stored = await cb.storeOracleFeed(feed);
+console.log("stored feedId", stored.feedId);
 const queue = await sb.getDefaultDevnetQueue("https://api.devnet.solana.com");
-console.log("queue loaded", queue.pubkey.toBase58());
-try {
-  const stored = await cb.storeOracleFeed(feed);
-  console.log("stored", JSON.stringify(stored).slice(0, 300));
-} catch (e) { console.log("store ERR", String(e).slice(0, 300)); }
-try {
-  const ix = await queue.fetchQuoteIx(cb, [feed], { numSignatures: 1, variableOverrides: {} });
-  console.log("quote ix program", ix.programId.toBase58(), "data bytes", ix.data.length, "keys", ix.keys.length);
-} catch (e) { console.log("quote ERR", String(e).slice(0, 500)); }
+for (const opts of [{ numSignatures: 1, instructionIdx: 0 }, { numSignatures: 1 }]) {
+  const ix = await queue.fetchQuoteIx(cb, [feed], opts);
+  const d = Buffer.from(ix.data);
+  const idx = [4, 8, 14].map(o => d.readUInt16LE(o));
+  const fid = Buffer.from(stored.feedId.replace(/^0x/, ""), "hex");
+  const at = d.indexOf(fid);
+  let val = null;
+  if (at >= 0) { const lo = d.readBigUInt64LE(at + 32), hi = d.readBigInt64LE(at + 40); val = (hi << 64n) + lo; }
+  console.log(JSON.stringify(opts), "sig/pk/msg ix indexes", idx, "feedId found at", at, "value(1e18)", val?.toString());
+}
