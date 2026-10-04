@@ -1,0 +1,33 @@
+{
+  "network": "testnet",
+  "code": "H100_SXM",
+  "dates": [
+    "2026-10-02",
+    "2026-10-03"
+  ],
+  "feedId": "0xe627418b4e8ee8970d37ebdd1eb365a79305d0dbe76a6faf54599023ac6a84e3",
+  "fetchedAt": "2026-10-04T18:22:22.635Z",
+  "timestamp": 1791138141,
+  "median": [
+    {
+      "value": "2715000000000000000",
+      "feedHash": "e627418b4e8ee8970d37ebdd1eb365a79305d0dbe76a6faf54599023ac6a84e3",
+      "numOracles": 1
+    }
+  ],
+  "oracles": [
+    {
+      "ethAddress": "7983aefcbebb6a81e3bfe78b8888e3b9f7498b35",
+      "queue": "c9477bfb5ff1012859f336cf98725680e7705ba2abece17188cfb28ca66ca5b0"
+    }
+  ],
+  "encoded": "0x000000001e3f251e000000006ac2995d0101e627418b4e8ee8970d37ebdd1eb365a79305d0dbe76a6faf54599023ac6a84e3000000000000000025ad9e1d852f800001b0ec999a577e7260540fe86a13ae2d6f19dd3375ee61d225c9d216360b5479ce3616dad4b4a0f0cc71555d8d4a3d7331df3e22eeaceb2e8efbe26821e5f8c85d1c",
+  "responseKeys": [
+    "medianResponses",
+    "oracleResponses",
+    "timestamp",
+    "slot",
+    "recentHash",
+    "encoded"
+  ]
+}
