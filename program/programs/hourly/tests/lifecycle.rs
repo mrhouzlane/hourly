@@ -667,3 +667,24 @@ fn vault_underwrites_an_epoch_and_pays_lps_pro_rata() {
     assert_eq!(balance(&e.svm, &v.cash), 0, "vault fully distributed");
     assert_eq!(balance(&e.svm, &s.vault), 0, "series escrow fully paid out");
 }
+
+#[test]
+fn pause_stops_new_trades_only() {
+    let mut e = setup();
+    let s = create_series(&mut e, true, KIND_DIGITAL, 2_700_000, USD, 1, T0, T0 + 5 * DAY).unwrap();
+    let (maker, taker) = (e.maker.insecure_clone(), e.taker.insecure_clone());
+    let mq = token_account(&mut e.svm, &e.usdc, &maker.pubkey(), 10 * USD);
+    let tq = token_account(&mut e.svm, &e.usdc, &taker.pubkey(), 10 * USD);
+    let tl = token_account(&mut e.svm, &s.long_mint, &taker.pubkey(), 0);
+    let set = |e: &mut Env, who: &Keypair, paused: bool| {
+        let ix = Instruction::new_with_bytes(hourly::id(), &hourly::instruction::SetPaused { paused }.data(),
+            hourly::accounts::AdminOnly { admin: who.pubkey(), config: e.config }.to_account_metas(None));
+        send(&mut e.svm, &[ix], who, &[who])
+    };
+    expect_code(set(&mut e, &maker, true), "Custom(6010)"); // only admin
+    let admin = e.admin.insecure_clone();
+    set(&mut e, &admin, true).unwrap();
+    expect_code(fill(&mut e, &s, &taker, &maker, tq, mq, tl, 1, 0, T0 + 30), "Custom(6020)"); // Paused
+    set(&mut e, &admin, false).unwrap();
+    fill(&mut e, &s, &taker, &maker, tq, mq, tl, 1, 400_000, T0 + 30).unwrap();
+}

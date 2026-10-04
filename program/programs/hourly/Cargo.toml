@@ -10,7 +10,9 @@ crate-type = ["cdylib", "lib"]
 name = "hourly"
 
 [features]
-default = []
+default = ["devnet"]
+# Switchboard devnet program and queue; build with --no-default-features for mainnet
+devnet = ["switchboard-on-demand/devnet"]
 cpi = ["no-entrypoint"]
 no-entrypoint = []
 no-log-ix-name = []
@@ -25,7 +27,7 @@ preview = []
 [dependencies]
 anchor-lang = { version = "1.1.2", features = ["init-if-needed"] }
 anchor-spl = { version = "1.1.2", default-features = false, features = ["token", "token_2022", "token_2022_extensions"] }
-switchboard-on-demand = { version = "0.13.0", default-features = false, features = ["solana-v3", "no-entrypoint", "devnet"] }
+switchboard-on-demand = { version = "0.13.0", default-features = false, features = ["solana-v3", "no-entrypoint"] }
 getrandom = { version = "0.2", features = ["custom"] }
 
 [dev-dependencies]

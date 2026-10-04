@@ -45,6 +45,12 @@ pub const KIND_CALL: u8 = 0;
 pub const KIND_PUT: u8 = 1;
 pub const KIND_DIGITAL: u8 = 2;
 
+/// Switchboard On-Demand program that must own the oracle queue.
+#[cfg(feature = "devnet")]
+pub const SB_PROGRAM: Pubkey = switchboard_on_demand::ON_DEMAND_DEVNET_PID;
+#[cfg(not(feature = "devnet"))]
+pub const SB_PROGRAM: Pubkey = switchboard_on_demand::ON_DEMAND_MAINNET_PID;
+
 pub const SLOT_HASHES_SYSVAR: Pubkey = pubkey!("SysvarS1otHashes111111111111111111111111111");
 pub const INSTRUCTIONS_SYSVAR: Pubkey = pubkey!("Sysvar1nstructions1111111111111111111111111");
 
@@ -81,6 +87,13 @@ pub mod hourly {
 
     pub fn set_settler(ctx: Context<AdminOnly>, settler: Pubkey) -> Result<()> {
         ctx.accounts.config.settler = settler;
+        Ok(())
+    }
+
+    /// Emergency switch: stops new fills and vault deposits. Settlement,
+    /// redemption and withdrawals keep working so funds can always leave.
+    pub fn set_paused(ctx: Context<AdminOnly>, paused: bool) -> Result<()> {
+        ctx.accounts.config.paused = paused;
         Ok(())
     }
 
@@ -140,6 +153,7 @@ pub mod hourly {
     /// the seller, and the buyer receives `qty` long tokens. Nothing moves
     /// unless all three legs move.
     pub fn fill(ctx: Context<Fill>, qty: u64, premium: u64, quote_expiry: i64) -> Result<()> {
+        require!(!ctx.accounts.config.paused, HourlyError::Paused);
         require!(qty > 0, HourlyError::BadQty);
         let now = Clock::get()?.unix_timestamp;
         require!(now <= quote_expiry, HourlyError::StaleQuote);
@@ -414,6 +428,7 @@ pub mod hourly {
     }
 
     pub fn vault_deposit(ctx: Context<VaultDeposit>, amount: u64) -> Result<()> {
+        require!(!ctx.accounts.config.paused, HourlyError::Paused);
         require!(amount > 0, HourlyError::BadQty);
         let now = Clock::get()?.unix_timestamp;
         require!(now < ctx.accounts.lp_vault.deposit_end, HourlyError::VaultClosed);
@@ -451,6 +466,7 @@ pub mod hourly {
 
     /// The vault writes `qty` contracts to a taker. The quoter sets the price.
     pub fn vault_sell(ctx: Context<VaultSell>, qty: u64, premium: u64, quote_expiry: i64) -> Result<()> {
+        require!(!ctx.accounts.config.paused, HourlyError::Paused);
         require!(qty > 0, HourlyError::BadQty);
         let now = Clock::get()?.unix_timestamp;
         require!(now <= quote_expiry, HourlyError::StaleQuote);
@@ -555,6 +571,7 @@ pub mod hourly {
 
     /// The vault buys `qty` contracts written by a taker.
     pub fn vault_buy(ctx: Context<VaultBuy>, qty: u64, premium: u64, quote_expiry: i64) -> Result<()> {
+        require!(!ctx.accounts.config.paused, HourlyError::Paused);
         require!(qty > 0, HourlyError::BadQty);
         let now = Clock::get()?.unix_timestamp;
         require!(now <= quote_expiry, HourlyError::StaleQuote);
@@ -858,6 +875,7 @@ pub struct Config {
     pub oracle_queue: Pubkey,
     pub treasury: Pubkey,
     pub fee_bps: u16,
+    pub paused: bool,
     pub bump: u8,
 }
 
@@ -981,6 +999,8 @@ pub enum HourlyError {
     VaultNotTrading,
     #[msg("series expires after the vault's epoch")]
     SeriesOutsideEpoch,
+    #[msg("venue is paused")]
+    Paused,
 }
 
 // ---------- accounts ----------
@@ -1115,7 +1135,7 @@ pub struct SettleOracle<'info> {
     pub series: Box<Account<'info, Series>>,
     /// CHECK: pinned to the Switchboard queue chosen at init and owned by the
     /// Switchboard On-Demand program; its oracle keys are read by QuoteVerifier.
-    #[account(address = config.oracle_queue @ HourlyError::OracleVerify, owner = switchboard_on_demand::ON_DEMAND_DEVNET_PID @ HourlyError::OracleVerify)]
+    #[account(address = config.oracle_queue @ HourlyError::OracleVerify, owner = SB_PROGRAM @ HourlyError::OracleVerify)]
     pub queue: UncheckedAccount<'info>,
     /// CHECK: address-checked slot hashes sysvar
     #[account(address = SLOT_HASHES_SYSVAR)]
