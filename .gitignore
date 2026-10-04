@@ -1,0 +1,5 @@
+keys/
+node_modules/
+program/target/
+*.log
+.env
