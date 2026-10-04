@@ -8,14 +8,27 @@
 //!   put     payoff/hour = min(max(K - S, 0), cap)     (cap <= K)
 //!   digital payoff      = cap if S > K else 0         (units = 1: pays `cap` atoms)
 //!
-//! S is the settlement price posted by the settler: the average of the daily
-//! index over [period_start, expiry], the same convention as ICE's OCPI futures.
-//! The settler also stores a sha256 of the raw index data it averaged, so anyone
-//! can recompute it. The settler is a trusted key in this version.
+//! S is the average of the daily index prints inside the series window, the
+//! same convention as ICE's OCPI futures. Settlement is permissionless: anyone
+//! can submit a Switchboard On-Demand oracle quote for the series' feed, whose
+//! job fetches the index and averages the window's prints. The program checks
+//! the quote's signatures against the pinned Switchboard queue and the feed
+//! hash stored on the series. A trusted settler key exists only as a fallback,
+//! usable FALLBACK_DELAY after expiry if no oracle settlement has happened.
 use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Burn, Mint, MintTo, Token, TokenAccount, Transfer};
+use switchboard_on_demand::QuoteVerifier;
 
 declare_id!("givjbTiAfcwKbKhr5kztwgkkNGZj3E8eEceKnvio8Bf");
+
+// A dependency of the oracle crate links getrandom. On-chain code must never
+// draw randomness, so the Solana build registers a source that always fails.
+#[cfg(target_os = "solana")]
+fn no_randomness(_buf: &mut [u8]) -> core::result::Result<(), getrandom::Error> {
+    Err(getrandom::Error::UNSUPPORTED)
+}
+#[cfg(target_os = "solana")]
+getrandom::register_custom_getrandom!(no_randomness);
 
 pub const CONFIG_SEED: &[u8] = b"config";
 pub const SERIES_SEED: &[u8] = b"series";
@@ -27,14 +40,25 @@ pub const KIND_CALL: u8 = 0;
 pub const KIND_PUT: u8 = 1;
 pub const KIND_DIGITAL: u8 = 2;
 
+pub const SLOT_HASHES_SYSVAR: Pubkey = pubkey!("SysvarS1otHashes111111111111111111111111111");
+pub const INSTRUCTIONS_SYSVAR: Pubkey = pubkey!("Sysvar1nstructions1111111111111111111111111");
+
+/// The trusted settler may act only this long after expiry.
+pub const FALLBACK_DELAY: i64 = 72 * 3600;
+/// Oracle quotes older than this many slots are rejected (about 60 s).
+pub const MAX_QUOTE_AGE_SLOTS: u64 = 150;
+/// Switchboard feed values are fixed point with 18 decimals; quote atoms use 6.
+const SB_TO_ATOMS: i128 = 1_000_000_000_000;
+
 #[program]
 pub mod hourly {
     use super::*;
 
-    pub fn init_config(ctx: Context<InitConfig>, settler: Pubkey) -> Result<()> {
+    pub fn init_config(ctx: Context<InitConfig>, settler: Pubkey, oracle_queue: Pubkey) -> Result<()> {
         let c = &mut ctx.accounts.config;
         c.admin = ctx.accounts.admin.key();
         c.settler = settler;
+        c.oracle_queue = oracle_queue;
         c.quote_mint = ctx.accounts.quote_mint.key();
         c.bump = ctx.bumps.config;
         Ok(())
@@ -55,6 +79,7 @@ pub mod hourly {
         units: u64,
         period_start: i64,
         expiry: i64,
+        feed_id: [u8; 32],
     ) -> Result<()> {
         require!(kind <= KIND_DIGITAL, HourlyError::BadKind);
         require!(cap > 0 && units > 0, HourlyError::BadTerms);
@@ -83,6 +108,8 @@ pub mod hourly {
         s.settle_price = 0;
         s.evidence = [0u8; 32];
         s.payoff_per_contract = 0;
+        s.feed_id = feed_id;
+        s.settled_by_oracle = false;
         s.bump = ctx.bumps.series;
         Ok(())
     }
@@ -215,22 +242,50 @@ pub mod hourly {
         Ok(())
     }
 
-    /// Settler posts the averaged index value once the window has closed.
+    /// Permissionless settlement from a Switchboard oracle quote. The quote's
+    /// Ed25519 instruction must sit at `quote_ix_index` in this transaction.
+    pub fn settle_oracle(ctx: Context<SettleOracle>, quote_ix_index: u8) -> Result<()> {
+        let clock = Clock::get()?;
+        let series = &ctx.accounts.series;
+        require!(!series.settled, HourlyError::AlreadySettled);
+        require!(clock.unix_timestamp >= series.expiry, HourlyError::NotExpired);
+
+        let queue = ctx.accounts.queue.to_account_info();
+        let slothashes = ctx.accounts.slothashes.to_account_info();
+        let instructions = ctx.accounts.instructions.to_account_info();
+        let mut verifier = QuoteVerifier::new();
+        verifier
+            .queue(&queue)
+            .slothash_sysvar(&slothashes)
+            .ix_sysvar(&instructions)
+            .clock_slot(clock.slot)
+            .max_age(MAX_QUOTE_AGE_SLOTS);
+        let quote = verifier.verify_instruction_at(quote_ix_index as i64).map_err(|e| {
+            msg!("oracle quote rejected: {}", e);
+            error!(HourlyError::OracleVerify)
+        })?;
+        let feed = quote
+            .feeds()
+            .iter()
+            .find(|f| f.feed_id() == &series.feed_id)
+            .ok_or(HourlyError::OracleFeedMissing)?;
+        let price = sb_value_to_atoms(feed.feed_value())?;
+        let mut evidence = [0u8; 32];
+        evidence[..8].copy_from_slice(&quote.slot().to_le_bytes());
+
+        let s = &mut ctx.accounts.series;
+        apply_settlement(s, price, evidence, true)
+    }
+
+    /// Fallback only: the trusted settler posts the averaged index value if no
+    /// oracle settlement has happened FALLBACK_DELAY after expiry.
     pub fn settle(ctx: Context<Settle>, price: u64, evidence: [u8; 32]) -> Result<()> {
         let now = Clock::get()?.unix_timestamp;
         let s = &mut ctx.accounts.series;
         require!(!s.settled, HourlyError::AlreadySettled);
         require!(now >= s.expiry, HourlyError::NotExpired);
-        s.settle_price = price;
-        s.evidence = evidence;
-        s.payoff_per_contract = payoff_per_contract(s.kind, s.strike, s.cap, s.units, price)?;
-        s.settled = true;
-        emit!(Settled {
-            series: s.key(),
-            price,
-            payoff_per_contract: s.payoff_per_contract,
-        });
-        Ok(())
+        require!(now >= s.expiry + FALLBACK_DELAY, HourlyError::FallbackTooEarly);
+        apply_settlement(s, price, evidence, false)
     }
 
     /// Long holder burns tokens and receives the settled payoff.
@@ -290,6 +345,30 @@ pub mod hourly {
 }
 
 // ---------- pure math ----------
+
+fn apply_settlement(s: &mut Account<Series>, price: u64, evidence: [u8; 32], by_oracle: bool) -> Result<()> {
+    s.settle_price = price;
+    s.evidence = evidence;
+    s.payoff_per_contract = payoff_per_contract(s.kind, s.strike, s.cap, s.units, price)?;
+    s.settled = true;
+    s.settled_by_oracle = by_oracle;
+    emit!(Settled {
+        series: s.key(),
+        price,
+        payoff_per_contract: s.payoff_per_contract,
+        by_oracle,
+    });
+    Ok(())
+}
+
+/// Converts an 18-decimal Switchboard value to 6-decimal quote atoms,
+/// rounding half up. Rejects non-positive and out-of-range values.
+pub fn sb_value_to_atoms(v: i128) -> Result<u64> {
+    require!(v > 0, HourlyError::OracleBadValue);
+    let atoms = (v + SB_TO_ATOMS / 2) / SB_TO_ATOMS;
+    require!(atoms > 0 && atoms <= u64::MAX as i128, HourlyError::OracleBadValue);
+    Ok(atoms as u64)
+}
 
 pub fn collateral_per_contract(s: &Series) -> Result<u64> {
     Ok(s.cap.checked_mul(s.units).ok_or(HourlyError::Overflow)?)
@@ -365,6 +444,7 @@ pub struct Config {
     pub admin: Pubkey,
     pub settler: Pubkey,
     pub quote_mint: Pubkey,
+    pub oracle_queue: Pubkey,
     pub bump: u8,
 }
 
@@ -386,6 +466,8 @@ pub struct Series {
     pub settle_price: u64,
     pub evidence: [u8; 32],
     pub payoff_per_contract: u64,
+    pub feed_id: [u8; 32],
+    pub settled_by_oracle: bool,
     pub bump: u8,
 }
 
@@ -412,6 +494,7 @@ pub struct Settled {
     pub series: Pubkey,
     pub price: u64,
     pub payoff_per_contract: u64,
+    pub by_oracle: bool,
 }
 
 #[error_code]
@@ -438,6 +521,14 @@ pub enum HourlyError {
     Overflow,
     #[msg("signer is not authorized")]
     Unauthorized,
+    #[msg("oracle quote failed verification")]
+    OracleVerify,
+    #[msg("oracle quote does not contain this series' feed")]
+    OracleFeedMissing,
+    #[msg("oracle value is out of range")]
+    OracleBadValue,
+    #[msg("fallback settlement is not open yet")]
+    FallbackTooEarly,
 }
 
 // ---------- accounts ----------
@@ -460,7 +551,7 @@ pub struct AdminOnly<'info> {
 }
 
 #[derive(Accounts)]
-#[instruction(underlying: [u8; 16], kind: u8, strike: u64, cap: u64, units: u64, period_start: i64, expiry: i64)]
+#[instruction(underlying: [u8; 16], kind: u8, strike: u64, cap: u64, units: u64, period_start: i64, expiry: i64, feed_id: [u8; 32])]
 pub struct CreateSeries<'info> {
     #[account(mut)]
     pub admin: Signer<'info>,
@@ -561,6 +652,24 @@ pub struct Close<'info> {
 }
 
 #[derive(Accounts)]
+pub struct SettleOracle<'info> {
+    #[account(seeds = [CONFIG_SEED], bump = config.bump)]
+    pub config: Box<Account<'info, Config>>,
+    #[account(mut, has_one = config)]
+    pub series: Box<Account<'info, Series>>,
+    /// CHECK: pinned to the Switchboard queue chosen at init and owned by the
+    /// Switchboard On-Demand program; its oracle keys are read by QuoteVerifier.
+    #[account(address = config.oracle_queue @ HourlyError::OracleVerify, owner = switchboard_on_demand::ON_DEMAND_DEVNET_PID @ HourlyError::OracleVerify)]
+    pub queue: UncheckedAccount<'info>,
+    /// CHECK: address-checked slot hashes sysvar
+    #[account(address = SLOT_HASHES_SYSVAR)]
+    pub slothashes: UncheckedAccount<'info>,
+    /// CHECK: address-checked instructions sysvar
+    #[account(address = INSTRUCTIONS_SYSVAR)]
+    pub instructions: UncheckedAccount<'info>,
+}
+
+#[derive(Accounts)]
 pub struct Settle<'info> {
     pub settler: Signer<'info>,
     #[account(seeds = [CONFIG_SEED], bump = config.bump, has_one = settler @ HourlyError::Unauthorized)]
@@ -619,5 +728,18 @@ mod math_tests {
         assert_eq!(payoff_per_contract(KIND_DIGITAL, 2_500_000, 1_000_000, 1, 2_500_000).unwrap(), 0);
         assert_eq!(payoff_per_contract(KIND_DIGITAL, 2_500_000, 1_000_000, 1, 2_500_001).unwrap(), 1_000_000);
         assert!(payoff_per_contract(9, 1, 1, 1, 1).is_err());
+    }
+
+    #[test]
+    fn oracle_value_conversion() {
+        // 2.715 with 18 decimals -> 2_715_000 atoms
+        assert_eq!(sb_value_to_atoms(2_715_000_000_000_000_000).unwrap(), 2_715_000);
+        // 2.6928571428571428571 -> rounds to 2_692_857
+        assert_eq!(sb_value_to_atoms(2_692_857_142_857_142_857).unwrap(), 2_692_857);
+        // half-up rounding at the 7th decimal
+        assert_eq!(sb_value_to_atoms(1_000_000_500_000_000_000).unwrap(), 1_000_001);
+        assert!(sb_value_to_atoms(0).is_err());
+        assert!(sb_value_to_atoms(-5).is_err());
+        assert!(sb_value_to_atoms(400_000_000_000).is_err(), "rounds to zero atoms");
     }
 }

@@ -19,6 +19,9 @@ const TOKEN: Pubkey = anchor_spl::token::ID;
 const SYSTEM: Pubkey = anchor_lang::system_program::ID;
 const DAY: i64 = 86_400;
 const T0: i64 = 1_791_158_400; // 2026-10-05 00:00 UTC
+const FEED: [u8; 32] = [9u8; 32];
+const SB_QUEUE: Pubkey = anchor_lang::pubkey!("EYiAmGSdsQTuCw413V5BzaruWuCCSDgTPtBGvLkXHbe7");
+const FALLBACK: i64 = hourly::FALLBACK_DELAY;
 
 struct Env {
     svm: LiteSVM,
@@ -103,7 +106,7 @@ fn setup() -> Env {
     let config = Pubkey::find_program_address(&[hourly::CONFIG_SEED], &hourly::id()).0;
     let ix = Instruction::new_with_bytes(
         hourly::id(),
-        &hourly::instruction::InitConfig { settler: settler.pubkey() }.data(),
+        &hourly::instruction::InitConfig { settler: settler.pubkey(), oracle_queue: SB_QUEUE }.data(),
         hourly::accounts::InitConfig { admin: admin.pubkey(), config, quote_mint: usdc, system_program: SYSTEM }
             .to_account_metas(None),
     );
@@ -144,7 +147,7 @@ fn create_series(e: &mut Env, signer_is_admin: bool, kind: u8, strike: u64, cap:
     let who = if signer_is_admin { e.admin.insecure_clone() } else { e.maker.insecure_clone() };
     let ix = Instruction::new_with_bytes(
         hourly::id(),
-        &hourly::instruction::CreateSeries { underlying: u, kind, strike, cap, units, period_start: start, expiry }.data(),
+        &hourly::instruction::CreateSeries { underlying: u, kind, strike, cap, units, period_start: start, expiry, feed_id: FEED }.data(),
         hourly::accounts::CreateSeries {
             admin: who.pubkey(),
             config: e.config,
@@ -198,6 +201,23 @@ fn settle(e: &mut Env, s: &S, who: &Keypair, price: u64) -> Result<(), String> {
         hourly::accounts::Settle { settler: who.pubkey(), config: e.config, series: s.series }.to_account_metas(None),
     );
     send(&mut e.svm, &[ix], who, &[who])
+}
+
+fn settle_oracle(e: &mut Env, s: &S, queue: Pubkey) -> Result<(), String> {
+    let ix = Instruction::new_with_bytes(
+        hourly::id(),
+        &hourly::instruction::SettleOracle { quote_ix_index: 0 }.data(),
+        hourly::accounts::SettleOracle {
+            config: e.config,
+            series: s.series,
+            queue,
+            slothashes: hourly::SLOT_HASHES_SYSVAR,
+            instructions: hourly::INSTRUCTIONS_SYSVAR,
+        }
+        .to_account_metas(None),
+    );
+    let admin = e.admin.insecure_clone();
+    send(&mut e.svm, &[ix], &admin, &[&admin])
 }
 
 fn redeem(e: &mut Env, s: &S, holder: &Keypair, holder_long: Pubkey, holder_q: Pubkey, qty: u64) -> Result<(), String> {
@@ -302,12 +322,21 @@ fn digital_full_lifecycle_pays_winner_and_returns_rest() {
     expect_code(redeem(&mut e, &s, &taker, tl, tq, 50), "Custom(6007)"); // NotSettled
 
     set_time(&mut e.svm, expiry);
+    // the trusted settler is a fallback only: closed until FALLBACK_DELAY after expiry
+    expect_code(settle(&mut e, &s, &settler, 2_800_000), "Custom(6014)"); // FallbackTooEarly
+    // an oracle settlement from the wrong queue is rejected
+    expect_code(settle_oracle(&mut e, &s, Keypair::new().pubkey()), "Custom(6011)"); // OracleVerify
+    // a quote-less oracle settlement against the pinned queue fails (queue not present here)
+    assert!(settle_oracle(&mut e, &s, SB_QUEUE).is_err());
+    set_time(&mut e.svm, expiry + FALLBACK);
     // only the settler can settle
     expect_code(settle(&mut e, &s, &maker, 1), "Custom(6010)"); // Unauthorized
     settle(&mut e, &s, &settler, 2_800_000).unwrap();
     expect_code(settle(&mut e, &s, &settler, 2_000_000), "Custom(6006)"); // AlreadySettled
     let ser: Series = read(&e.svm, &s.series);
     assert!(ser.settled);
+    assert!(!ser.settled_by_oracle);
+    assert_eq!(ser.feed_id, FEED);
     assert_eq!(ser.payoff_per_contract, USD);
     assert_eq!(ser.evidence, [7u8; 32]);
 
@@ -331,7 +360,7 @@ fn call_spread_pays_capped_amount_and_vault_balances() {
     fill(&mut e, &s, &taker, &maker, tq, mq, tl, 3, 150 * USD, T0 + 30).unwrap();
     assert_eq!(balance(&e.svm, &s.vault), 3 * 288 * USD);
 
-    set_time(&mut e.svm, expiry + 1);
+    set_time(&mut e.svm, expiry + FALLBACK);
     let settler = e.settler.insecure_clone();
     settle(&mut e, &s, &settler, 2_750_000).unwrap(); // average $2.75 -> $0.15/h -> $108 per contract
     redeem(&mut e, &s, &taker, tl, tq, 3).unwrap();
@@ -353,7 +382,7 @@ fn put_out_of_the_money_returns_all_collateral_to_writer() {
     let ml = token_account(&mut e.svm, &s.long_mint, &maker.pubkey(), 0);
     fill(&mut e, &s, &maker, &taker, mq, tq, ml, 2, 20 * USD, T0 + 30).unwrap();
     assert_eq!(balance(&e.svm, &tq), 1_000 * USD - 720 * USD + 20 * USD);
-    set_time(&mut e.svm, expiry);
+    set_time(&mut e.svm, expiry + FALLBACK);
     let settler = e.settler.insecure_clone();
     settle(&mut e, &s, &settler, 2_500_000).unwrap();
     redeem(&mut e, &s, &maker, ml, mq, 2).unwrap();
