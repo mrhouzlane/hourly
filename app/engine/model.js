@@ -167,18 +167,27 @@ function makerQuote(fair, maxPayoff) {
 function backtest(seriesByCode, horizons = [3, 7, 14], minHistory = 40) {
   const out = [];
   for (const h of horizons) {
-    let inside = 0, below = 0, above = 0, n = 0;
+    let inside = 0, below = 0, above = 0, n = 0, brier = 0, brierCoin = 0;
     for (const points of Object.values(seriesByCode)) {
       for (let i = minHistory; i + h < points.length; i++) {
         const hist = points.slice(0, i + 1);
         const c = calibrate(hist);
         const target = points[i + h];
-        const r = priceSeries(c, hist, { kind: 2, strike: 0, cap: 1, units: 1 }, [target.date]);
+        // at-the-money question: will the print h days out be above today's print?
+        const strike = hist[hist.length - 1].v;
+        const r = priceSeries(c, hist, { kind: 2, strike, cap: 1, units: 1 }, [target.date]);
         if (target.v < r.settle.p10) below++; else if (target.v > r.settle.p90) above++; else inside++;
+        const y = target.v > strike ? 1 : 0;
+        brier += (r.probItm - y) ** 2;
+        brierCoin += (0.5 - y) ** 2;
         n++;
       }
     }
-    out.push({ horizonDays: h, coverage: n ? inside / n : null, below: n ? below / n : null, above: n ? above / n : null, n });
+    out.push({
+      horizonDays: h, n,
+      coverage: n ? inside / n : null, below: n ? below / n : null, above: n ? above / n : null,
+      brier: n ? brier / n : null, brierCoin: n ? brierCoin / n : null,
+    });
   }
   return out;
 }

@@ -178,8 +178,9 @@ async function mintQuote(owner, usd) {
   return send([ix, spl.createMintToInstruction(mint, ata, keys.admin.publicKey, amount)], []);
 }
 
-const explorer = (sig) => `https://explorer.solana.com/tx/${sig}${CLUSTER === "devnet" ? "?cluster=devnet" : `?cluster=custom&customUrl=${encodeURIComponent(RPC_URL)}`}`;
-const explorerAddr = (a) => `https://explorer.solana.com/address/${a}${CLUSTER === "devnet" ? "?cluster=devnet" : `?cluster=custom&customUrl=${encodeURIComponent(RPC_URL)}`}`;
+// Explorer links only exist for public clusters; a private preview chain has none.
+const explorer = (sig) => (CLUSTER === "devnet" ? `https://explorer.solana.com/tx/${sig}?cluster=devnet` : null);
+const explorerAddr = (a) => (CLUSTER === "devnet" ? `https://explorer.solana.com/address/${a}?cluster=devnet` : null);
 
 module.exports = {
   CLUSTER, RPC_URL, ORACLE_QUEUE, conn, keys, get state() { return state; }, save,

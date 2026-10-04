@@ -111,57 +111,77 @@ async function markets() {
   return out;
 }
 
+// A quote is one or more legs filled atomically in one transaction.
 // side: "buy" = user buys the contract from the venue's maker (pays ask);
 //       "sell" = user writes the contract to the maker (posts collateral, receives bid).
-async function quote({ seriesId, side, qty, owner }) {
-  if (!["buy", "sell"].includes(side)) throw venue.httpError(400, "side must be buy or sell");
-  qty = Number(qty);
-  if (!Number.isInteger(qty) || qty <= 0) throw venue.httpError(400, "quantity must be a whole number above zero");
+async function quote({ legs, seriesId, side, qty, owner }) {
+  if (!legs) legs = [{ series: seriesId, side, qty }];
+  if (!Array.isArray(legs) || legs.length < 1 || legs.length > 2) throw venue.httpError(400, "one or two legs per quote");
   let user;
   try { user = new PublicKey(owner); } catch (_) { throw venue.httpError(400, "bad wallet address"); }
   if (user.equals(venue.keys.maker.publicKey) || user.equals(venue.keys.admin.publicKey)) throw venue.httpError(400, "venue keys cannot trade");
   const list = await listSeries();
-  const s = list.find((x) => x.pubkey.toBase58() === seriesId);
-  if (!s) throw venue.httpError(404, "unknown market");
   const nowS = Math.floor(Date.now() / 1000);
-  if (s.settled || nowS >= Number(s.expiry) - 60) throw venue.httpError(409, "This market is closed for trading.");
-  const lim = LIMITS[s.meta.door];
-  if (qty > lim.maxQty) throw venue.httpError(400, `Maximum ${lim.maxQty} contracts per trade here.`);
-
-  const p = await price(s);
-  const unit = side === "buy" ? p.ask : p.bid;
-  if (side === "sell" && unit <= 0) throw venue.httpError(409, "The desk has no bid on this contract right now.");
-  const premiumAtoms = BigInt(Math.round(unit * qty * USD));
-  const collateralAtoms = BigInt(s.cap) * BigInt(s.units) * BigInt(qty);
   const quoteMint = new PublicKey(venue.state.quoteMint);
   const maker = venue.keys.maker.publicKey;
-
-  // balance checks give a readable error before the wallet prompt
-  const userBal = (await venue.tokenBalances(user, [quoteMint.toBase58()]))[quoteMint.toBase58()] || 0n;
-  if (side === "buy" && userBal < premiumAtoms) throw venue.httpError(402, "Not enough test USDC. Use the faucet first.");
-  if (side === "sell" && userBal < collateralAtoms) throw venue.httpError(402, `Writing needs $${(Number(collateralAtoms) / USD).toLocaleString()} of collateral. Use the faucet or trade fewer.`);
-  if (side === "buy") {
-    const makerPos = (await venue.positions(maker, [s.pubkey]))[s.pubkey.toBase58()] || 0n;
-    if (makerPos + BigInt(qty) > BigInt(lim.makerMaxShort)) throw venue.httpError(409, "The desk is at its risk limit on this market.");
-  }
-
-  const buyer = side === "buy" ? user : maker;
-  const seller = side === "buy" ? maker : user;
-  const longMint = chain.longMintPda(s.pubkey);
-  const ixs = [
-    venue.ataIx(longMint, buyer).ix,
-    venue.ataIx(quoteMint, user).ix,
-    chain.fill({
+  const ixs = [venue.ataIx(quoteMint, user).ix];
+  const outLegs = [];
+  let payAtoms = 0n, receiveAtoms = 0n, lockAtoms = 0n;
+  const seen = new Set();
+  for (const leg of legs) {
+    if (!["buy", "sell"].includes(leg.side)) throw venue.httpError(400, "side must be buy or sell");
+    const q = Number(leg.qty);
+    if (!Number.isInteger(q) || q <= 0) throw venue.httpError(400, "quantity must be a whole number above zero");
+    const s = list.find((x) => x.pubkey.toBase58() === leg.series);
+    if (!s) throw venue.httpError(404, "unknown market");
+    if (seen.has(leg.series)) throw venue.httpError(400, "two legs on the same market");
+    seen.add(leg.series);
+    if (s.settled || nowS >= Number(s.expiry) - 60) throw venue.httpError(409, "This market is closed for trading.");
+    const lim = LIMITS[s.meta.door];
+    if (q > lim.maxQty) throw venue.httpError(400, `Maximum ${lim.maxQty} contracts per trade here.`);
+    const p = await price(s);
+    const unit = leg.side === "buy" ? p.ask : p.bid;
+    if (leg.side === "sell" && unit <= 0) throw venue.httpError(409, "The desk has no bid on this contract right now.");
+    const premiumAtoms = BigInt(Math.round(unit * q * USD));
+    const collateralAtoms = BigInt(s.cap) * BigInt(s.units) * BigInt(q);
+    if (leg.side === "buy") {
+      payAtoms += premiumAtoms;
+      const makerPos = (await venue.positions(maker, [s.pubkey]))[s.pubkey.toBase58()] || 0n;
+      if (makerPos + BigInt(q) > BigInt(lim.makerMaxShort)) throw venue.httpError(409, "The desk is at its risk limit on this market.");
+    } else {
+      receiveAtoms += premiumAtoms;
+      lockAtoms += collateralAtoms;
+    }
+    const buyer = leg.side === "buy" ? user : maker;
+    const seller = leg.side === "buy" ? maker : user;
+    ixs.push(venue.ataIx(chain.longMintPda(s.pubkey), buyer).ix);
+    ixs.push(chain.fill({
       payer: venue.keys.admin.publicKey, buyer, seller, series: s.pubkey, quoteMint,
-      qty, premium: premiumAtoms, quoteExpiry: nowS + QUOTE_LIFETIME_S,
-    }),
-  ];
+      qty: q, premium: premiumAtoms, quoteExpiry: nowS + QUOTE_LIFETIME_S,
+    }));
+    outLegs.push({
+      series: leg.series, title: s.meta.title, side: leg.side, qty: q, price: unit,
+      premium: Number(premiumAtoms) / USD, collateral: leg.side === "sell" ? Number(collateralAtoms) / USD : 0,
+      model: { fair: p.fair, bid: p.bid, ask: p.ask },
+    });
+  }
+  // the program moves the seller's collateral before the buyer's premium, so a
+  // writer needs the full collateral up front even if premium comes back in
+  const userBal = (await venue.tokenBalances(user, [quoteMint.toBase58()]))[quoteMint.toBase58()] || 0n;
+  const need = payAtoms + lockAtoms;
+  if (userBal < need) {
+    throw venue.httpError(402, lockAtoms > 0n
+      ? `This trade needs $${(Number(need) / USD).toLocaleString("en-US", { maximumFractionDigits: 2 })} of test USDC, including collateral. Use the faucet or trade fewer.`
+      : "Not enough test USDC. Use the faucet first.");
+  }
+  const first = outLegs[0];
   const meta = {
-    kind: "fill", series: seriesId, side, qty, price: unit, premium: Number(premiumAtoms) / USD,
-    collateral: side === "sell" ? Number(collateralAtoms) / USD : 0, user: user.toBase58(), title: s.meta.title,
+    kind: "fill", series: first.series, side: first.side, qty: first.qty, price: first.price, title: outLegs.map((l) => l.title).join(" + "),
+    legs: outLegs, pay: Number(payAtoms) / USD, receive: Number(receiveAtoms) / USD, lock: Number(lockAtoms) / USD,
+    premium: first.premium, collateral: first.collateral, user: user.toBase58(),
   };
-  const prepared = await venue.prepareUserTx({ ixs, user, venueSigners: [venue.keys.maker], meta, units: 120_000 });
-  return { ...prepared, ...meta, expiresIn: QUOTE_LIFETIME_S, model: { fair: p.fair, bid: p.bid, ask: p.ask } };
+  const prepared = await venue.prepareUserTx({ ixs, user, venueSigners: [venue.keys.maker], meta, units: 110_000 * outLegs.length + 30_000 });
+  return { ...prepared, ...meta, expiresIn: QUOTE_LIFETIME_S };
 }
 
 // Post-trade actions a user signs: redeem a settled long, reclaim collateral,

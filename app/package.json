@@ -1,20 +1,26 @@
 {
-  "name": "app",
+  "name": "hourly",
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "esbuild src/client.js --bundle --minify --format=iife --target=es2019 --outfile=public/app.js",
+    "start": "node server.js",
+    "e2e": "node scripts/e2e.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "description": "",
+  "description": "Options on the rental price of AI chips, settled on Solana by oracle.",
   "dependencies": {
     "@solana/spl-token": "^0.4.15",
     "@solana/web3.js": "^1.99.0",
     "@switchboard-xyz/common": "^5.8.5",
     "@switchboard-xyz/on-demand": "^3.10.6",
+    "@wallet-standard/app": "^1.1.0",
     "bs58": "^5.0.0",
     "tweetnacl": "^1.0.3"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2"
   }
 }

@@ -5,3 +5,4 @@ program/target/
 .env
 app/state/
 app/sbquote.mjs
+preview-ledger/

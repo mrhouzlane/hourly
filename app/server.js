@@ -151,7 +151,7 @@ const routes = {
 
   "POST /api/quote": async (req, url, body, ip) => {
     if (!allow(`q:${ip}`, 40, 60_000)) throw venue.httpError(429, "Too many quotes. Wait a minute.");
-    return market.quote({ seriesId: body.series, side: body.side, qty: body.qty, owner: body.owner });
+    return market.quote({ legs: body.legs, seriesId: body.series, side: body.side, qty: body.qty, owner: body.owner });
   },
 
   "POST /api/action": async (req, url, body, ip) => {
@@ -163,7 +163,7 @@ const routes = {
     if (!allow(`s:${ip}`, 30, 60_000)) throw venue.httpError(429, "Too many submissions. Wait a minute.");
     const r = await venue.submitUserTx({ id: body.id, tx: body.tx, signature: body.signature });
     if (r.meta.kind === "fill") {
-      venue.state.fills.push({ tx: r.signature, at: new Date().toISOString(), series: r.meta.series, side: r.meta.side, qty: r.meta.qty, price: r.meta.price, title: r.meta.title });
+      for (const l of r.meta.legs || []) venue.state.fills.push({ tx: r.signature, at: new Date().toISOString(), series: l.series, side: l.side, qty: l.qty, price: l.price, title: l.title });
       venue.state.fills = venue.state.fills.slice(-500);
       venue.save();
     }
