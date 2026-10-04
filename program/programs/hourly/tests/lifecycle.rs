@@ -688,3 +688,71 @@ fn pause_stops_new_trades_only() {
     set(&mut e, &admin, false).unwrap();
     fill(&mut e, &s, &taker, &maker, tq, mq, tl, 1, 400_000, T0 + 30).unwrap();
 }
+
+// ---------------- fuzz: random trading, then settle and pay out ----------------
+
+struct Rng(u64);
+impl Rng {
+    fn next(&mut self) -> u64 { self.0 ^= self.0 << 13; self.0 ^= self.0 >> 7; self.0 ^= self.0 << 17; self.0 }
+    fn below(&mut self, n: u64) -> u64 { self.next() % n }
+}
+
+fn pos_amount(svm: &LiteSVM, series: &Pubkey, writer: &Pubkey) -> u64 {
+    match svm.get_account(&position(series, writer)) {
+        Some(a) if !a.data.is_empty() => { let mut d: &[u8] = &a.data; hourly::Position::try_deserialize(&mut d).map(|p| p.amount).unwrap_or(0) }
+        _ => 0,
+    }
+}
+
+#[test]
+fn fuzz_escrow_always_solvent_and_usdc_conserved() {
+    let n: u64 = std::env::var("FUZZ_SEEDS").ok().and_then(|v| v.parse().ok()).unwrap_or(300);
+    for seed in 1..=n {
+        eprintln!("fuzz seed {seed}");
+        let mut r = Rng(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1);
+        let mut e = setup();
+        let kind = (r.below(3)) as u8;
+        let strike = 1_000_000 + r.below(4_000_000);
+        let cap = if kind == KIND_PUT { 1 + r.below(strike) } else { 1 + r.below(2_000_000) };
+        let units = 1 + r.below(30);
+        let expiry = T0 + 3 * DAY;
+        let s = create_series(&mut e, true, kind, strike, cap, units, T0, expiry).unwrap();
+        let coll = cap * units;
+        let actors: Vec<Keypair> = (0..4).map(|_| Keypair::new()).collect();
+        let mut q = vec![]; let mut l = vec![];
+        for a in &actors {
+            e.svm.airdrop(&a.pubkey(), 1_000_000_000).unwrap();
+            q.push(token_account(&mut e.svm, &e.usdc, &a.pubkey(), 2_000 * USD));
+            l.push(token_account(&mut e.svm, &s.long_mint, &a.pubkey(), 0));
+        }
+        let total0: u64 = q.iter().map(|k| balance(&e.svm, k)).sum();
+        for _ in 0..25 {
+            let (b, w) = (r.below(4) as usize, r.below(4) as usize);
+            if r.below(5) < 4 {
+                if b == w { continue; }
+                let qty = 1 + r.below(15);
+                let premium = r.below(coll * qty + 1);
+                let _ = fill(&mut e, &s, &actors[b], &actors[w], q[b], q[w], l[b], qty, premium, T0 + 30);
+            } else {
+                let held = balance(&e.svm, &l[w]).min(pos_amount(&e.svm, &s.series, &actors[w].pubkey()));
+                if held > 0 { close(&mut e, &s, &actors[w], l[w], q[w], 1 + r.below(held)).unwrap(); }
+            }
+            let ser: Series = read(&e.svm, &s.series);
+            assert_eq!(balance(&e.svm, &s.vault), ser.open_interest * coll, "seed {seed}: escrow != OI x collateral");
+            let longs: u64 = l.iter().map(|k| balance(&e.svm, k)).sum();
+            assert_eq!(longs, ser.open_interest, "seed {seed}: long supply != OI");
+        }
+        let price = r.below(8_000_000);
+        set_time(&mut e.svm, expiry + FALLBACK);
+        let settler = e.settler.insecure_clone();
+        settle(&mut e, &s, &settler, price).unwrap();
+        for i in 0..4 {
+            let n = balance(&e.svm, &l[i]);
+            if n > 0 { redeem(&mut e, &s, &actors[i], l[i], q[i], n).unwrap(); }
+            if pos_amount(&e.svm, &s.series, &actors[i].pubkey()) > 0 { reclaim(&mut e, &s, &actors[i], q[i]).unwrap(); }
+        }
+        assert_eq!(balance(&e.svm, &s.vault), 0, "seed {seed}: escrow not empty after payout");
+        let total1: u64 = q.iter().map(|k| balance(&e.svm, k)).sum::<u64>() + balance(&e.svm, &e.treasury);
+        assert_eq!(total0, total1, "seed {seed}: USDC created or destroyed");
+    }
+}

@@ -2,6 +2,7 @@
 import { getWallets } from "@wallet-standard/app";
 import nacl from "tweetnacl";
 import bs58 from "bs58";
+import { createSolanaClient } from "@metamask/connect-solana";
 
 // ---------- tiny utils ----------
 const $ = (s, el = document) => el.querySelector(s);
@@ -42,7 +43,22 @@ async function api(path, body) {
 
 // ---------- state ----------
 const S = { index: [], markets: [], status: null, gpu: "H100_SXM", door: "predict", wallet: null, portfolio: null };
-const chainId = () => (S.status && S.status.cluster === "devnet" ? "solana:devnet" : "solana:localnet");
+const PUBLIC_CLUSTERS = { devnet: "solana:devnet", mainnet: "solana:mainnet" };
+const isPublic = () => !!(S.status && PUBLIC_CLUSTERS[S.status.cluster]);
+const chainId = () => (S.status && PUBLIC_CLUSTERS[S.status.cluster]) || "solana:localnet";
+
+// MetaMask's Solana accounts join the Wallet Standard registry through its SDK.
+async function registerMetaMask() {
+  if (!isPublic()) return;
+  try {
+    const net = S.status.cluster;
+    await createSolanaClient({
+      dapp: { name: "Hourly", url: location.origin },
+      api: { supportedNetworks: { [net]: net === "mainnet" ? "https://api.mainnet-beta.solana.com" : "https://api.devnet.solana.com" } },
+      analytics: { enabled: false },
+    });
+  } catch (_) { /* MetaMask not installed or blocked: other wallets still work */ }
+}
 
 // ---------- wallets ----------
 const walletsApi = getWallets();
@@ -125,17 +141,17 @@ document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !sheet.h
 
 function walletPicker(after) {
   const ws = standardWallets();
-  const devnet = S.status && S.status.cluster === "devnet";
+  const devnet = isPublic();
   const list = (devnet ? ws : []).map((w, i) => `<button class="wallet-btn" type="button" data-w="${i}"><img src="${esc(w.icon)}" alt="">${esc(w.name)}</button>`).join("");
   openSheet(`
     <h3 id="sheet-title">Connect a wallet</h3>
-    <p class="lead">Hourly runs on Solana devnet with test USDC. The venue pays every network fee, so you need no SOL.</p>
+    <p class="lead">${S.status && S.status.cluster === "mainnet" ? "Hourly runs on Solana mainnet with USDC." : "Hourly runs on a Solana test network with test USDC."} The venue pays every network fee, so you need no SOL.</p>
     <div class="wallets">
       ${list}
-      <button class="wallet-btn" type="button" data-burner><span class="burner-dot"></span>Burner wallet for this browser</button>
+      ${S.status && S.status.cluster === "mainnet" ? "" : '<button class="wallet-btn" type="button" data-burner><span class="burner-dot"></span>Burner wallet for this browser</button>'}
     </div>
     <p class="hint">${devnet
-      ? (ws.length ? "Set your wallet to Devnet before signing. In Phantom: Settings, Developer Settings, Testnet Mode." : "No Solana wallet found. Install Phantom, Solflare or Backpack, or use a burner.")
+      ? (ws.length ? (S.status.cluster === "devnet" ? "Set your wallet to Devnet before signing. In Phantom: Settings, Developer Settings, Testnet Mode." : "Phantom, Solflare, Backpack and MetaMask are supported.") : "No Solana wallet found. Install Phantom, Solflare, Backpack or MetaMask, or use a burner.")
       : "This is a local test network. Use the burner wallet."}</p>
     <p class="status" id="w-status"></p>`);
   $$("[data-w]").forEach((b) => b.addEventListener("click", async () => {
@@ -144,7 +160,7 @@ function walletPicker(after) {
     try { await setWallet(await connectStandard(ws[Number(b.dataset.w)])); closeSheet(); if (after) after(); }
     catch (e) { st.className = "status err"; st.textContent = e.message || "Connection was declined."; }
   }));
-  $("[data-burner]").addEventListener("click", async () => { await setWallet(burnerWallet()); closeSheet(); if (after) after(); });
+  if ($("[data-burner]")) $("[data-burner]").addEventListener("click", async () => { await setWallet(burnerWallet()); closeSheet(); if (after) after(); });
 }
 
 function walletMenu() {
@@ -764,6 +780,7 @@ function reveal() {
 (async function main() {
   reveal();
   await refreshStatus();
+  registerMetaMask();
   await Promise.all([refreshIndex(), refreshMarkets()]);
   await restoreWallet();
   setInterval(refreshMarkets, 30_000);

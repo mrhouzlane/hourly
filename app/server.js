@@ -117,7 +117,7 @@ const routes = {
     const cfg = await venue.readConfig();
     return {
       cluster: venue.CLUSTER,
-      rpc: venue.CLUSTER === "devnet" ? venue.RPC_URL : "local validator",
+      rpc: venue.IS_PUBLIC ? venue.RPC_URL : "local validator",
       programId: chain.PROGRAM_ID.toBase58(),
       programUrl: venue.explorerAddr(chain.PROGRAM_ID.toBase58()),
       quoteMint: venue.state.quoteMint,
@@ -185,6 +185,7 @@ const routes = {
   },
 
   "POST /api/faucet": async (req, url, body, ip) => {
+    if (venue.CLUSTER === "mainnet") throw venue.httpError(404, "There is no faucet on mainnet.");
     let owner;
     try { owner = new (require("@solana/web3.js").PublicKey)(body.owner); } catch (_) { throw venue.httpError(400, "bad wallet address"); }
     if (!allow(`fi:${ip}`, 6, 3_600_000)) throw venue.httpError(429, "Faucet limit reached for this network. Try again in an hour.");

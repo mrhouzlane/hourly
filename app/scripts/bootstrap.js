@@ -15,6 +15,7 @@ const ornn = require("../engine/ornn");
   const prog = await venue.conn.getAccountInfo(chain.PROGRAM_ID);
   if (!prog || !prog.executable) throw new Error("program is not deployed on this cluster");
 
+  if (venue.CLUSTER === "mainnet" && !venue.state.quoteMint) { venue.state.quoteMint = venue.MAINNET_USDC; venue.save(); }
   if (!venue.state.quoteMint) {
     venue.state.quoteMint = (await venue.createQuoteMint()).toBase58();
     venue.save();

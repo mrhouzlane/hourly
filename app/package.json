@@ -12,6 +12,7 @@
   "license": "ISC",
   "description": "Options on the rental price of AI chips, settled on Solana by oracle.",
   "dependencies": {
+    "@metamask/connect-solana": "^2.1.1",
     "@solana/spl-token": "^0.4.15",
     "@solana/web3.js": "^1.99.0",
     "@switchboard-xyz/common": "^5.8.5",

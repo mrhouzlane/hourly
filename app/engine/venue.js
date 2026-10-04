@@ -13,10 +13,16 @@ const chain = require("./chain");
 
 const ROOT = path.join(__dirname, "..");
 const CLUSTER = process.env.CLUSTER || "devnet";
-const RPC_URL = process.env.RPC_URL || (CLUSTER === "devnet" ? "https://api.devnet.solana.com" : "http://127.0.0.1:8899");
+const PUBLIC = { devnet: "https://api.devnet.solana.com", mainnet: "https://api.mainnet-beta.solana.com" };
+const IS_PUBLIC = !!PUBLIC[CLUSTER];
+const RPC_URL = process.env.RPC_URL || PUBLIC[CLUSTER] || "http://127.0.0.1:8899";
+// Real USDC on mainnet; test mints elsewhere are created by bootstrap.
+const MAINNET_USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const KEYS_DIR = process.env.KEYS_DIR || path.join(ROOT, "..", "keys");
 const STATE_FILE = process.env.STATE_FILE || path.join(ROOT, "state", `${CLUSTER}.json`);
-const ORACLE_QUEUE = new PublicKey(process.env.ORACLE_QUEUE || "EYiAmGSdsQTuCw413V5BzaruWuCCSDgTPtBGvLkXHbe7");
+// Switchboard On-Demand default queues (verified 2026-10-04 via the SDK)
+const ORACLE_QUEUE = new PublicKey(process.env.ORACLE_QUEUE ||
+  (CLUSTER === "mainnet" ? "A43DyUGA7s8eXPxqEjJY6EBu1KKbNgfxF8h17VAHn13w" : "EYiAmGSdsQTuCw413V5BzaruWuCCSDgTPtBGvLkXHbe7"));
 
 const conn = new Connection(RPC_URL, "confirmed");
 
@@ -179,11 +185,12 @@ async function mintQuote(owner, usd) {
 }
 
 // Explorer links only exist for public clusters; a private preview chain has none.
-const explorer = (sig) => (CLUSTER === "devnet" ? `https://explorer.solana.com/tx/${sig}?cluster=devnet` : null);
-const explorerAddr = (a) => (CLUSTER === "devnet" ? `https://explorer.solana.com/address/${a}?cluster=devnet` : null);
+const q = () => (CLUSTER === "mainnet" ? "" : `?cluster=${CLUSTER}`);
+const explorer = (sig) => (IS_PUBLIC ? `https://explorer.solana.com/tx/${sig}${q()}` : null);
+const explorerAddr = (a) => (IS_PUBLIC ? `https://explorer.solana.com/address/${a}${q()}` : null);
 
 module.exports = {
-  CLUSTER, RPC_URL, ORACLE_QUEUE, conn, keys, get state() { return state; }, save,
+  CLUSTER, IS_PUBLIC, MAINNET_USDC, RPC_URL, ORACLE_QUEUE, conn, keys, get state() { return state; }, save,
   send, prepareUserTx, submitUserTx, httpError, readConfig, readAllSeries, tokenBalances, positions,
   ataIx, createQuoteMint, mintQuote, explorer, explorerAddr, computeIxs,
 };

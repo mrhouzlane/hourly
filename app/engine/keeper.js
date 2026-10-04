@@ -16,7 +16,8 @@ const MAKER_FLOOR_USD = 2_000_000;
 const EPOCH_BASE_S = Date.parse("2026-10-05T00:00:00Z") / 1000;
 const WEEK_S = 7 * 86400;
 const VAULT_CAP_BPS = 2_000; // at most 20% of a vault's deposits at risk in any one market
-const VENUE_SEED_USD = 25_000; // the venue's own deposit, shown as such in the app
+// the venue's own deposit, shown as such in the app; on mainnet the operator sets it explicitly
+const VENUE_SEED_USD = Number(process.env.VENUE_SEED_USD ?? (process.env.CLUSTER === "mainnet" ? 0 : 25_000));
 const MAKER_TOPUP_USD = 5_000_000;
 
 let sb = null; // lazy ESM imports
@@ -25,7 +26,8 @@ async function switchboard() {
   const ondemand = await import("@switchboard-xyz/on-demand");
   const common = await import("@switchboard-xyz/common");
   const crossbar = new common.CrossbarClient(CROSSBAR_URL, false);
-  const queue = venue.CLUSTER === "devnet" ? await ondemand.getDefaultDevnetQueue(venue.RPC_URL) : null;
+  const queue = venue.CLUSTER === "devnet" ? await ondemand.getDefaultDevnetQueue(venue.RPC_URL)
+    : venue.CLUSTER === "mainnet" ? await ondemand.getDefaultQueue(venue.RPC_URL) : null;
   sb = { ondemand, crossbar, queue };
   return sb;
 }
@@ -102,7 +104,7 @@ async function rollListings() {
 
 async function settleOracle(s) {
   const { crossbar, queue } = await switchboard();
-  if (!queue) throw new Error("oracle settlement needs devnet");
+  if (!queue) throw new Error("oracle settlement needs devnet or mainnet");
   const meta = venue.state.series[s.pubkey.toBase58()];
   const feed = ornn.oracleFeed(s.underlying, meta.dates);
   // instructionIdx 0: the program checks the Ed25519 offsets point at index 0
@@ -136,7 +138,7 @@ async function settleDue() {
     if (s.settled || nowS < Number(s.expiry)) continue;
     const id = s.pubkey.toBase58();
     let sig = null, how = null;
-    if (venue.CLUSTER !== "devnet") {
+    if (!venue.IS_PUBLIC) {
       // preview chain: no Switchboard there; the preview build lets the backup key settle at expiry
       try { sig = await settleFallback(s); how = "preview"; }
       catch (e) { log("preview settle failed", id, String(e.message || e).slice(0, 200)); }
@@ -160,6 +162,7 @@ async function settleDue() {
 }
 
 async function restockMaker() {
+  if (venue.CLUSTER === "mainnet") return; // real USDC is funded by the operator, never minted
   const mint = venue.state.quoteMint;
   const bal = (await venue.tokenBalances(venue.keys.maker.publicKey, [mint]))[mint] || 0n;
   if (Number(bal) / 1e6 < MAKER_FLOOR_USD) {
@@ -194,7 +197,7 @@ async function ensureVaults() {
     const v = venue.state.vaults[n] || { epoch: n, pubkey: pda.toBase58(), depositEnd, epochEnd, seeded: 0 };
     venue.state.vaults[n] = v;
     // the venue seeds each vault so it can trade from day one; LP deposits stack on top
-    if (!v.seeded && nowS < depositEnd) {
+    if (!v.seeded && VENUE_SEED_USD > 0 && nowS < depositEnd) {
       const maker = venue.keys.maker.publicKey;
       const shares = chain.sharesPda(pda);
       await venue.send([
