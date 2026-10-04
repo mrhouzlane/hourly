@@ -43,3 +43,11 @@ Deadline: submissions due 2026-10-12 (verified colosseum.com/worldsfair).
   G9A1tg5zgxMZg4EsoeBt8Yi5hEfwXsAEiu8zEqcAMxMT. Keys in ~/compute-options/keys (gitignored).
 - Build gotchas: anchor-spl needs token_2022 + token_2022_extensions features; Box large accounts
   (stack overflow in fill); pin solana-program to 3.0.0 (cargo update --precise); getrandom custom stub.
+
+## Checkpoint 2026-10-04 ~17:15 UTC
+- [x] 3 index + pricing engine (two-factor, vol x1.5, live backtest with Brier)
+- [x] 4 server + maker + keeper (oracle settle w/ retries, 72h fallback, daily roll, restock)
+- [x] 5 web UI: wallet-standard + burner, predict/hedge, atomic collar, portfolio. Screenshot-verified desktop+mobile.
+- [x] Preview LIVE http://34.177.105.21/hourly/ (:7990, private chain, cron run.sh). Caddy backup caddy-docker.conf.bak-hourly-20261004171134
+- [ ] 2 devnet deploy: BLOCKED on SOL (asked Mehdi again 17:05)
+- [ ] 6 submission kit: README, GTM, pitch + demo scripts, third-party maker example

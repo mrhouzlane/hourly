@@ -92,6 +92,7 @@ function view(s, p, nowS) {
       fair: p.fair, probItm: p.probItm, bid: p.bid, ask: p.ask,
       settleP10: p.settle.p10, settleP50: p.settle.p50, settleP90: p.settle.p90,
       observedPrints: p.observedPrints, futurePrints: p.futurePrints, calibratedOn: p.calibratedOn,
+      dist: p.dist,
     };
   }
   return out;

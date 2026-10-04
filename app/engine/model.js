@@ -139,7 +139,22 @@ function priceSeries(cal, points, series, dates) {
     if (v > 0) itm++;
   }
   const sorted = Float64Array.from(m).sort();
+  // compact histogram of the settlement price, for charts
+  let dist = null;
+  if (m.length) {
+    const lo = quantile(sorted, 0.005), hi = quantile(sorted, 0.995);
+    const nb = 48, bins = new Array(nb).fill(0);
+    if (hi > lo) {
+      for (let i = 0; i < m.length; i++) {
+        const k = Math.floor(((m[i] - lo) / (hi - lo)) * nb);
+        if (k >= 0 && k < nb) bins[k]++;
+      }
+      const mx = Math.max(...bins) || 1;
+      dist = { lo, hi, bins: bins.map((b) => Math.round((b / mx) * 1000) / 1000) };
+    }
+  }
   return {
+    dist,
     fair: m.length ? pay / m.length : 0,
     probItm: m.length ? itm / m.length : 0,
     maxPayoff: series.cap * series.units,

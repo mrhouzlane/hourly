@@ -233,9 +233,9 @@ function drawCurve(history) {
 }
 
 // ---------- markets ----------
-$$(".switch button").forEach((b) => b.addEventListener("click", () => {
+$$(".switch button[data-door]").forEach((b) => b.addEventListener("click", () => {
   S.door = b.dataset.door;
-  $$(".switch button").forEach((x) => x.classList.toggle("on", x === b));
+  $$(".switch button[data-door]").forEach((x) => x.classList.toggle("on", x === b));
   renderMarkets();
 }));
 
@@ -243,72 +243,202 @@ function question(m) {
   return `Will the ${m.gpu} print above $${m.strike.toFixed(2)} on ${dayLabel(m.windowEnd)}?`;
 }
 
+const GPU_ORDER = ["H100_SXM", "H200", "B200", "A100_SXM4"];
+const lastPrint = (code) => { const g = S.index.find((x) => x.code === code); return g ? g.last : null; };
+const historyOf = (code) => { const g = S.index.find((x) => x.code === code); return g ? g.history : []; };
+
 function renderMarkets() {
-  const list = $("#market-list");
-  const live = S.markets.filter((m) => m.door === S.door && m.status !== "settled");
-  if (S.door === "predict") {
-    $("#door-note").textContent = "Yes or no on a single day's price. A winning contract pays $1. Prices come from the venue's market maker and move with the index.";
-    if (!live.length) { list.innerHTML = '<p class="empty">No open questions right now. New ones list every day.</p>'; return; }
-    list.innerHTML = live.map((m) => {
-      const md = m.model;
-      if (!md) return `<div class="row"><div><div class="q">${esc(question(m))}</div><div class="q-meta">Settling. The oracle reads the print after 4pm New York.</div></div></div>`;
-      const noPrice = Math.max(0.01, 1 - md.bid);
-      return `<div class="row">
-        <div><div class="q">${esc(question(m))}</div><div class="q-meta">Closes in ${countdown(m.expiry)}.${m.openInterest ? ` ${m.openInterest.toLocaleString()} contracts open.` : ""}</div></div>
-        <div class="yn">
-          <div class="chance">${pct(md.probItm)}<small>model</small></div>
-          <button class="pill" type="button" data-trade="${m.id}" data-side="yes">Yes<b>${cents(md.ask)}</b></button>
-          <button class="pill" type="button" data-trade="${m.id}" data-side="no">No<b>${cents(noPrice)}</b></button>
-        </div>
-      </div>`;
-    }).join("");
-  } else {
-    $("#door-note").textContent = "Floors and caps on a month's average rental price. One contract covers one GPU for every hour of the month, like the exchange-listed futures, and pays in USDC.";
-    const byGpu = {};
-    for (const m of live) (byGpu[m.underlying] = byGpu[m.underlying] || {})[m.kind] = m;
-    const order = ["H100_SXM", "H200", "B200", "A100_SXM4"];
-    const blocks = order.filter((c) => byGpu[c] && byGpu[c].put && byGpu[c].call).map((c) => hedgeBlock(byGpu[c].put, byGpu[c].call));
-    list.innerHTML = blocks.length
-      ? `<div class="hedge-grid">${blocks.join("")}</div><p class="fine">Floors and caps are spreads: each pays at most its width times the hours in the month, so every contract is fully backed by USDC in escrow. Selling a cap locks that maximum until settlement.</p>`
-      : '<p class="empty">No hedges open right now.</p>';
-  }
-  $$("[data-trade]").forEach((b) => b.addEventListener("click", () => startPredict(b.dataset.trade, b.dataset.side)));
-  $$("[data-hedge]").forEach((b) => b.addEventListener("click", () => startHedge(b.dataset.hedge, b.dataset.put, b.dataset.call)));
+  if (S.door === "predict") renderPredict(); else renderHedge();
 }
 
-function payoffSvg(put, call) {
-  const lo = put.strike - put.cap * 1.6, hi = call.strike + call.cap * 1.6;
-  const W = 400, H = 64;
-  const x = (s) => ((s - lo) / (hi - lo)) * W;
-  const maxP = Math.max(put.cap, call.cap);
-  const y = (v) => H - 6 - (v / maxP) * (H - 14);
-  const putPts = [[lo, put.cap], [put.strike - put.cap, put.cap], [put.strike, 0], [hi, 0]];
-  const callPts = [[lo, 0], [call.strike, 0], [call.strike + call.cap, call.cap], [hi, call.cap]];
-  const d = (pts) => pts.map((p, i) => `${i ? "L" : "M"}${x(p[0]).toFixed(1)},${y(p[1]).toFixed(1)}`).join(" ");
-  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
-    <line x1="0" x2="${W}" y1="${H - 6}" y2="${H - 6}" stroke="#d5dce2" vector-effect="non-scaling-stroke"/>
-    <path d="${d(putPts)}" fill="none" stroke="#16181a" stroke-width="1.4" vector-effect="non-scaling-stroke"/>
-    <path d="${d(callPts)}" fill="none" stroke="#8d9ca9" stroke-width="1.4" vector-effect="non-scaling-stroke"/>
+// ----- predict: one headline question, then a ladder grouped by GPU -----
+function featuredMarket(live) {
+  const h = live.filter((m) => m.underlying === "H100_SXM" && m.model);
+  if (!h.length) return live.find((m) => m.model) || null;
+  const minExp = Math.min(...h.map((m) => m.expiry));
+  const soon = h.filter((m) => m.expiry === minExp);
+  const last = lastPrint("H100_SXM") || 0;
+  return soon.sort((a, b) => Math.abs(a.strike - last) - Math.abs(b.strike - last))[0];
+}
+
+function featureChart(m) {
+  const hist = historyOf(m.underlying).slice(-21);
+  if (hist.length < 2 || !m.model) return "";
+  const W = 560, H = 240, padL = 8, padR = 64, padT = 16, padB = 28;
+  const t0 = Date.parse(`${hist[0][0]}T00:00:00Z`);
+  const tEnd = Date.parse(`${m.windowEnd}T00:00:00Z`);
+  const span = Math.max(1, tEnd - t0);
+  const vals = hist.map((p) => p[1]).concat([m.model.settleP10, m.model.settleP90, m.strike]);
+  const lo = Math.min(...vals), hi = Math.max(...vals), pad = (hi - lo) * 0.12 || 0.1;
+  const y0 = lo - pad, y1 = hi + pad;
+  const X = (d) => padL + ((Date.parse(`${d}T00:00:00Z`) - t0) / span) * (W - padL - padR);
+  const Y = (v) => padT + (1 - (v - y0) / (y1 - y0)) * (H - padT - padB);
+  const pts = hist.map((p) => [X(p[0]), Y(p[1])]);
+  const last = pts[pts.length - 1];
+  const xe = X(m.windowEnd);
+  const cone = `M${last[0]},${last[1]} L${xe},${Y(m.model.settleP90)} L${xe},${Y(m.model.settleP10)} Z`;
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Recent prints, strike and the model's 80% range">
+    <path d="${cone}" fill="#97faf6" fill-opacity="0.45"/>
+    <line x1="${padL}" x2="${W - padR}" y1="${Y(m.strike)}" y2="${Y(m.strike)}" stroke="#8d9ca9" stroke-dasharray="3 5" vector-effect="non-scaling-stroke"/>
+    <text x="${W - padR + 8}" y="${Y(m.strike) + 4}" class="ax">$${m.strike.toFixed(2)}</text>
+    <path d="${smoothPath(pts)}" fill="none" stroke="#16181a" stroke-width="1.4" vector-effect="non-scaling-stroke"/>
+    <circle cx="${last[0]}" cy="${last[1]}" r="3.5" fill="#16181a"/>
+    <line x1="${xe}" x2="${xe}" y1="${Y(m.model.settleP90)}" y2="${Y(m.model.settleP10)}" stroke="#16181a" stroke-width="1" vector-effect="non-scaling-stroke"/>
+    <text x="${padL}" y="${H - 6}" class="ax">${dayLabel(hist[0][0])}</text>
+    <text x="${xe}" y="${H - 6}" class="ax" text-anchor="middle">${dayLabel(m.windowEnd)}</text>
   </svg>`;
 }
 
-function hedgeBlock(put, call) {
-  const hours = put.units;
+function chanceBar(p) {
+  return `<span class="bar"><span style="width:${Math.max(2, Math.round(p * 100))}%"></span></span>`;
+}
+
+function renderPredict() {
+  const list = $("#market-list");
+  const live = S.markets.filter((m) => m.door === "predict" && m.status !== "settled");
+  $("#door-note").textContent = "Yes or no on one day's price. A winning contract pays $1.";
+  if (!live.length) { list.innerHTML = '<p class="empty">No open questions right now. New ones list every day.</p>'; return; }
+  const f = featuredMarket(live);
+  let html = "";
+  if (f && f.model) {
+    const noPrice = Math.max(0.01, 1 - f.model.bid);
+    html += `<div class="feature">
+      <div class="feature-text">
+        <div class="label muted">Closes in ${countdown(f.expiry)}</div>
+        <h3>${esc(question(f))}</h3>
+        <div class="feature-num">${pct(f.model.probItm)}<small>chance, by the venue's model</small></div>
+        <div class="feature-yn">
+          <button class="pill big-pill" type="button" data-trade="${f.id}" data-side="yes">Yes ${cents(f.model.ask)}</button>
+          <button class="pill big-pill" type="button" data-trade="${f.id}" data-side="no">No ${cents(noPrice)}</button>
+        </div>
+        <p class="feature-note">Last print $${(lastPrint(f.underlying) || 0).toFixed(2)}. The shaded cone is the model's 80% range for ${dayLabel(f.windowEnd)}.</p>
+      </div>
+      <div class="feature-chart">${featureChart(f)}</div>
+    </div>`;
+  }
+  const rest = live.filter((m) => !f || m.id !== f.id);
+  const groups = GPU_ORDER.map((code) => [code, rest.filter((m) => m.underlying === code)]).filter(([, ms]) => ms.length);
+  html += `<div class="ladder">${groups.map(([code, ms]) => {
+    const label = ms[0].gpu;
+    const lp = lastPrint(code);
+    return `<div class="ladder-group">
+      <div class="ladder-head"><span>${esc(label)}</span><span class="muted">${lp ? `last $${lp.toFixed(2)}` : ""}</span></div>
+      ${ms.sort((a, b) => a.expiry - b.expiry || a.strike - b.strike).map((m) => {
+        if (!m.model) return `<div class="lrow"><div class="lq">${dayLabel(m.windowEnd)}<span class="muted">above $${m.strike.toFixed(2)}</span></div><div class="lsettle muted">Settling</div></div>`;
+        const noPrice = Math.max(0.01, 1 - m.model.bid);
+        return `<div class="lrow">
+          <div class="lq">${dayLabel(m.windowEnd)}<span class="muted">above $${m.strike.toFixed(2)}</span></div>
+          ${chanceBar(m.model.probItm)}
+          <div class="lp">${pct(m.model.probItm)}</div>
+          <button class="pill small py" type="button" data-trade="${m.id}" data-side="yes">Yes ${cents(m.model.ask)}</button>
+          <button class="pill small pn" type="button" data-trade="${m.id}" data-side="no">No ${cents(noPrice)}</button>
+        </div>`;
+      }).join("")}
+    </div>`;
+  }).join("")}</div>`;
+  list.innerHTML = html;
+  $$("[data-trade]").forEach((b) => b.addEventListener("click", () => startPredict(b.dataset.trade, b.dataset.side)));
+}
+
+// ----- hedge: one builder -----
+S.hedgeGpu = "H100_SXM";
+S.hedgeRole = "own";
+S.collar = false;
+
+function hedgePair(code) {
+  const live = S.markets.filter((m) => m.door === "hedge" && m.status === "open" && m.underlying === code && m.model);
+  const put = live.find((m) => m.kind === "put"), call = live.find((m) => m.kind === "call");
+  return put && call ? { put, call } : null;
+}
+
+function hedgeChart(pair, role, collar) {
+  const { put, call } = pair;
+  const d = (role === "own" ? put : call).model.dist;
+  if (!d) return "";
+  const today = lastPrint(put.underlying) || put.strike;
+  const xlo = Math.min(d.lo, put.strike - put.cap * 1.3, today), xhi = Math.max(d.hi, call.strike + call.cap * 1.3, today);
+  const W = 560, H = 240, padT = 22, padB = 30;
+  const X = (v) => ((v - xlo) / (xhi - xlo)) * W;
+  const base = H - padB;
+  // model distribution of the month's average
+  const bw = (d.hi - d.lo) / d.bins.length;
+  const dens = d.bins.map((b, i) => [X(d.lo + (i + 0.5) * bw), base - b * (base - padT) * 0.9]);
+  const densPath = `M${X(d.lo)},${base} ${dens.map((p) => `L${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ")} L${X(d.hi)},${base} Z`;
+  // payoff per contract, scaled so the max payout sits near the top
+  const maxPay = Math.max(put.maxPayoff, call.maxPayoff);
+  const Yp = (v) => base - (v / maxPay) * (base - padT) * 0.85;
+  const payAt = (s) => {
+    let v = 0;
+    if (role === "own") { v += Math.min(Math.max(put.strike - s, 0), put.cap) * put.units; if (collar) v -= Math.min(Math.max(s - call.strike, 0), call.cap) * call.units; }
+    else v += Math.min(Math.max(s - call.strike, 0), call.cap) * call.units;
+    return v;
+  };
+  const xs = [xlo, put.strike - put.cap, put.strike, call.strike, call.strike + call.cap, xhi].sort((a, b) => a - b);
+  const pay = xs.map((s) => `${X(s).toFixed(1)},${Math.min(H - 4, Yp(payAt(s))).toFixed(1)}`).join(" L");
+  const k = role === "own" ? put.strike : call.strike;
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Payout against the month's average price, over the model's distribution">
+    <path d="${densPath}" fill="#97faf6" fill-opacity="0.5"/>
+    <line x1="0" x2="${W}" y1="${base}" y2="${base}" stroke="#d5dce2" vector-effect="non-scaling-stroke"/>
+    <path d="M${pay}" fill="none" stroke="#16181a" stroke-width="1.6" vector-effect="non-scaling-stroke" stroke-linejoin="round"/>
+    <line x1="${X(today)}" x2="${X(today)}" y1="${padT - 8}" y2="${base}" stroke="#8d9ca9" stroke-dasharray="3 5" vector-effect="non-scaling-stroke"/>
+    <text x="${X(today)}" y="${padT - 12}" class="ax" text-anchor="middle">today $${today.toFixed(2)}</text>
+    <text x="${X(k)}" y="${H - 8}" class="ax" text-anchor="middle">$${k.toFixed(2)}</text>
+    ${role === "own" && collar ? `<text x="${X(call.strike)}" y="${H - 8}" class="ax" text-anchor="middle">$${call.strike.toFixed(2)}</text>` : ""}
+  </svg>`;
+}
+
+function renderHedge() {
+  const list = $("#market-list");
+  $("#door-note").textContent = "Floors and caps on a month's average rental price. One contract covers one GPU for every hour of the month and pays in USDC.";
+  const codes = GPU_ORDER.filter((c) => hedgePair(c));
+  if (!codes.length) { list.innerHTML = '<p class="empty">No hedges open right now.</p>'; return; }
+  if (!codes.includes(S.hedgeGpu)) S.hedgeGpu = codes[0];
+  const pair = hedgePair(S.hedgeGpu);
+  const { put, call } = pair;
+  const month = monthLabel(put.windowStart);
+  const own = S.hedgeRole === "own";
   const pm = put.model, cm = call.model;
-  if (!pm || !cm) return "";
-  return `<div class="hedge">
-    <div class="hedge-head"><h3>${esc(put.gpu)}</h3><span>${monthLabel(put.windowStart)} average, ${hours} GPU-hours</span></div>
-    <div class="legs">
-      <div class="leg"><div class="label">Floor $${put.strike.toFixed(2)}</div><div class="num">${usd(pm.ask)}</div><div class="small">Pays up to ${usd(put.maxPayoff, 0)} if the month averages $${(put.strike - put.cap).toFixed(2)} or less.</div></div>
-      <div class="leg"><div class="label">Cap $${call.strike.toFixed(2)}</div><div class="num">${usd(cm.ask)}</div><div class="small">Pays up to ${usd(call.maxPayoff, 0)} if the month averages $${(call.strike + call.cap).toFixed(2)} or more.</div></div>
+  let headline, price, priceNote, lines;
+  if (own) {
+    headline = `Floor your ${month} ${put.gpu} revenue at $${put.strike.toFixed(2)} an hour.`;
+    if (S.collar) {
+      price = usd(pm.ask - cm.bid);
+      priceNote = `net per GPU-month: pay ${usd(pm.ask)} for the floor, receive ${usd(cm.bid)} for the $${call.strike.toFixed(2)} cap`;
+      lines = [`Locks ${usd(call.maxPayoff, 0)} per contract until settlement.`, `Gives up revenue above $${call.strike.toFixed(2)} an hour, up to $${(call.strike + call.cap).toFixed(2)}.`];
+    } else {
+      price = usd(pm.ask);
+      priceNote = `per GPU-month, ${put.units} hours of ${month}`;
+      lines = [`Pays up to ${usd(put.maxPayoff, 0)} if ${month} averages $${(put.strike - put.cap).toFixed(2)} or less.`, `Model chance it pays: ${pct(pm.probItm)}.`];
+    }
+  } else {
+    headline = `Cap your ${month} ${call.gpu} cost at $${call.strike.toFixed(2)} an hour.`;
+    price = usd(cm.ask);
+    priceNote = `per GPU-month, ${call.units} hours of ${month}`;
+    lines = [`Pays up to ${usd(call.maxPayoff, 0)} if ${month} averages $${(call.strike + call.cap).toFixed(2)} or more.`, `Model chance it pays: ${pct(cm.probItm)}.`];
+  }
+  list.innerHTML = `
+    <div class="builder-controls">
+      <div class="gpus left" role="tablist" aria-label="GPU">${codes.map((c) => { const p = hedgePair(c); return `<button type="button" data-hg="${c}" class="${c === S.hedgeGpu ? "on" : ""}">${esc(p.put.gpu)}</button>`; }).join("")}</div>
+      <div class="switch small-switch" role="tablist" aria-label="Role">
+        <button type="button" data-role="own" class="${own ? "on" : ""}">I own GPUs</button>
+        <button type="button" data-role="rent" class="${own ? "" : "on"}">I rent GPUs</button>
+      </div>
     </div>
-    <div class="payoff">${payoffSvg(put, call)}</div>
-    <div class="actions">
-      <button class="pill small" type="button" data-hedge="floor" data-put="${put.id}" data-call="${call.id}">I own GPUs: buy the floor</button>
-      <button class="pill small" type="button" data-hedge="cap" data-put="${put.id}" data-call="${call.id}">I rent GPUs: buy the cap</button>
-      <button class="pill small" type="button" data-hedge="collar" data-put="${put.id}" data-call="${call.id}">Collar</button>
-    </div>
-  </div>`;
+    <div class="builder">
+      <div class="builder-text">
+        <h3>${esc(headline)}</h3>
+        <div class="feature-num">${price}<small>${esc(priceNote)}</small></div>
+        ${lines.map((l) => `<p class="builder-line">${esc(l)}</p>`).join("")}
+        ${own ? `<label class="toggle"><input type="checkbox" id="collar" ${S.collar ? "checked" : ""}><span>Pay for it by selling the $${call.strike.toFixed(2)} cap</span></label>` : ""}
+        <button class="pill dark go-wide" type="button" id="hedge-go">${own ? `Protect ${month}` : `Cap ${month}`}</button>
+      </div>
+      <div class="builder-chart">${hedgeChart(pair, S.hedgeRole, own && S.collar)}<p class="feature-note">Line: payout per contract against ${month}'s average price. Shade: where the model expects that average to land.</p></div>
+    </div>`;
+  $$("[data-hg]").forEach((b) => b.addEventListener("click", () => { S.hedgeGpu = b.dataset.hg; renderHedge(); }));
+  $$("[data-role]").forEach((b) => b.addEventListener("click", () => { S.hedgeRole = b.dataset.role; renderHedge(); }));
+  const c = $("#collar");
+  if (c) c.addEventListener("change", () => { S.collar = c.checked; renderHedge(); });
+  $("#hedge-go").addEventListener("click", () => startHedge(own ? (S.collar ? "collar" : "floor") : "cap", put.id, call.id));
 }
 
 // ---------- ticket ----------
