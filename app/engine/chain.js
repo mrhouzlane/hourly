@@ -26,6 +26,8 @@ const ACC = Object.fromEntries(IDL.accounts.map((a) => [a.name, Buffer.from(a.di
 
 // ---------- little borsh writer ----------
 const u8 = (v) => Buffer.from([v]);
+const u16 = (v) => { const b = Buffer.alloc(2); b.writeUInt16LE(Number(v)); return b; };
+const u32 = (v) => { const b = Buffer.alloc(4); b.writeUInt32LE(Number(v)); return b; };
 const u64 = (v) => { const b = Buffer.alloc(8); b.writeBigUInt64LE(BigInt(v)); return b; };
 const i64 = (v) => { const b = Buffer.alloc(8); b.writeBigInt64LE(BigInt(v)); return b; };
 const pk = (k) => new PublicKey(k).toBuffer();
@@ -40,6 +42,8 @@ function encodeArgs(ixName, args) {
     if (v === undefined) throw new Error(`${ixName}: missing arg ${a.name}`);
     const t = a.type;
     if (t === "u8") parts.push(u8(v));
+    else if (t === "u16") parts.push(u16(v));
+    else if (t === "u32") parts.push(u32(v));
     else if (t === "u64") parts.push(u64(v));
     else if (t === "i64") parts.push(i64(v));
     else if (t === "pubkey") parts.push(pk(v));
@@ -53,6 +57,8 @@ function buildIx(ixName, accounts, args) {
   const def = IX[ixName];
   const keys = def.accounts.map((a) => {
     const k = accounts[a.name];
+    // Anchor encodes an absent optional account as the program id
+    if (!k && a.optional) return { pubkey: PROGRAM_ID, isSigner: false, isWritable: false };
     if (!k) throw new Error(`${ixName}: missing account ${a.name}`);
     return { pubkey: new PublicKey(k), isSigner: !!a.signer, isWritable: !!a.writable };
   });
@@ -86,10 +92,10 @@ const positionPda = (series, writer) =>
 const ata = (mint, owner) => getAssociatedTokenAddressSync(new PublicKey(mint), new PublicKey(owner), true);
 
 // ---------- instructions ----------
-function initConfig({ admin, settler, oracleQueue, quoteMint }) {
+function initConfig({ admin, settler, oracleQueue, quoteMint, treasury, feeBps }) {
   return buildIx("init_config",
-    { admin, config: configPda(), quote_mint: quoteMint, system_program: SystemProgram.programId },
-    { settler, oracle_queue: oracleQueue });
+    { admin, config: configPda(), quote_mint: quoteMint, treasury, system_program: SystemProgram.programId },
+    { settler, oracle_queue: oracleQueue, fee_bps: feeBps });
 }
 
 function createSeries({ admin, quoteMint, underlying, kind, strike, cap, units, periodStart, expiry, feedId }) {
@@ -105,13 +111,76 @@ function createSeries({ admin, quoteMint, underlying, kind, strike, cap, units, 
   return { ix, series, longMint: longMintPda(series), vault: vaultPda(series) };
 }
 
-function fill({ payer, buyer, seller, series, quoteMint, qty, premium, quoteExpiry }) {
+function fill({ payer, buyer, seller, series, quoteMint, treasury, qty, premium, quoteExpiry }) {
   const longMint = longMintPda(series);
   return buildIx("fill", {
     payer, buyer, seller, config: configPda(), series, long_mint: longMint, vault: vaultPda(series),
     buyer_quote: ata(quoteMint, buyer), seller_quote: ata(quoteMint, seller), buyer_long: ata(longMint, buyer),
-    position: positionPda(series, seller), token_program: TOKEN_PROGRAM_ID, system_program: SystemProgram.programId,
+    treasury, position: positionPda(series, seller), token_program: TOKEN_PROGRAM_ID, system_program: SystemProgram.programId,
   }, { qty, premium, quote_expiry: quoteExpiry });
+}
+
+// ---------- underwriting vaults ----------
+const lpVaultPda = (epoch) => find([Buffer.from("lpvault"), configPda().toBuffer(), u32(epoch)]);
+const sharesPda = (vault) => find([Buffer.from("lpshares"), new PublicKey(vault).toBuffer()]);
+const cashPda = (vault) => find([Buffer.from("lpcash"), new PublicKey(vault).toBuffer()]);
+const vaultLongPda = (vault, series) => find([Buffer.from("lplong"), new PublicKey(vault).toBuffer(), new PublicKey(series).toBuffer()]);
+const vaultSeriesPda = (vault, series) => find([Buffer.from("lpseries"), new PublicKey(vault).toBuffer(), new PublicKey(series).toBuffer()]);
+
+function createVault({ admin, quoteMint, epoch, quoter, depositEnd, epochEnd, maxSeriesBps }) {
+  const v = lpVaultPda(epoch);
+  return buildIx("create_vault", {
+    admin, config: configPda(), quote_mint: quoteMint, lp_vault: v, share_mint: sharesPda(v), cash: cashPda(v),
+    token_program: TOKEN_PROGRAM_ID, system_program: SystemProgram.programId,
+  }, { epoch, quoter, deposit_end: depositEnd, epoch_end: epochEnd, max_series_bps: maxSeriesBps });
+}
+
+function vaultDeposit({ epoch, depositor, quoteMint, amount }) {
+  const v = lpVaultPda(epoch);
+  return buildIx("vault_deposit", {
+    depositor, config: configPda(), lp_vault: v, share_mint: sharesPda(v), cash: cashPda(v),
+    depositor_quote: ata(quoteMint, depositor), depositor_shares: ata(sharesPda(v), depositor), token_program: TOKEN_PROGRAM_ID,
+  }, { amount });
+}
+
+function vaultSell({ payer, quoter, taker, epoch, series, quoteMint, treasury, qty, premium, quoteExpiry }) {
+  const v = lpVaultPda(epoch);
+  const longMint = longMintPda(series);
+  return buildIx("vault_sell", {
+    payer, quoter, taker, config: configPda(), lp_vault: v, cash: cashPda(v), treasury, series, long_mint: longMint,
+    vault: vaultPda(series), taker_quote: ata(quoteMint, taker), taker_long: ata(longMint, taker),
+    position: positionPda(series, v), vault_series: vaultSeriesPda(v, series),
+    token_program: TOKEN_PROGRAM_ID, system_program: SystemProgram.programId,
+  }, { qty, premium, quote_expiry: quoteExpiry });
+}
+
+function vaultBuy({ payer, quoter, taker, epoch, series, quoteMint, treasury, qty, premium, quoteExpiry }) {
+  const v = lpVaultPda(epoch);
+  return buildIx("vault_buy", {
+    payer, quoter, taker, config: configPda(), lp_vault: v, cash: cashPda(v), treasury, series, long_mint: longMintPda(series),
+    vault: vaultPda(series), taker_quote: ata(quoteMint, taker), vault_long: vaultLongPda(v, series),
+    position: positionPda(series, taker), vault_series: vaultSeriesPda(v, series),
+    token_program: TOKEN_PROGRAM_ID, system_program: SystemProgram.programId,
+  }, { qty, premium, quote_expiry: quoteExpiry });
+}
+
+function vaultCollect({ epoch, series, hasLong, hasShort }) {
+  const v = lpVaultPda(epoch);
+  return buildIx("vault_collect", {
+    config: configPda(), lp_vault: v, cash: cashPda(v), series, long_mint: longMintPda(series), vault: vaultPda(series),
+    vault_series: vaultSeriesPda(v, series),
+    vault_long: hasLong ? vaultLongPda(v, series) : null,
+    position: hasShort ? positionPda(series, v) : null,
+    token_program: TOKEN_PROGRAM_ID,
+  }, {});
+}
+
+function vaultWithdraw({ epoch, owner, quoteMint, shares }) {
+  const v = lpVaultPda(epoch);
+  return buildIx("vault_withdraw", {
+    owner, config: configPda(), lp_vault: v, share_mint: sharesPda(v), cash: cashPda(v),
+    owner_shares: ata(sharesPda(v), owner), owner_quote: ata(quoteMint, owner), token_program: TOKEN_PROGRAM_ID,
+  }, { shares });
 }
 
 function close({ writer, series, quoteMint, qty }) {
@@ -152,6 +221,8 @@ function settleOracle({ series, queue, quoteIxIndex }) {
 class Reader {
   constructor(buf) { this.b = buf; this.o = 0; }
   u8() { return this.b.readUInt8(this.o++); }
+  u16() { const v = this.b.readUInt16LE(this.o); this.o += 2; return v; }
+  u32() { const v = this.b.readUInt32LE(this.o); this.o += 4; return v; }
   bool() { return this.u8() !== 0; }
   u64() { const v = this.b.readBigUInt64LE(this.o); this.o += 8; return v; }
   i64() { const v = this.b.readBigInt64LE(this.o); this.o += 8; return v; }
@@ -166,7 +237,7 @@ function checkDisc(buf, name) {
 
 function decodeConfig(buf) {
   const r = checkDisc(buf, "Config");
-  return { admin: r.pk(), settler: r.pk(), quoteMint: r.pk(), oracleQueue: r.pk(), bump: r.u8() };
+  return { admin: r.pk(), settler: r.pk(), quoteMint: r.pk(), oracleQueue: r.pk(), treasury: r.pk(), feeBps: r.u16(), bump: r.u8() };
 }
 
 function decodeSeries(buf) {
@@ -191,11 +262,27 @@ function decodePosition(buf) {
   return { writer: r.pk(), series: r.pk(), amount: r.u64(), bump: r.u8() };
 }
 
+function decodeLpVault(buf) {
+  const r = checkDisc(buf, "LpVault");
+  return {
+    config: r.pk(), epoch: r.u32(), quoter: r.pk(), shareMint: r.pk(), cash: r.pk(),
+    depositEnd: r.i64(), epochEnd: r.i64(), deposits: r.u64(), maxSeriesBps: r.u16(),
+    openSeries: r.u32(), premiums: r.u64(), bump: r.u8(),
+  };
+}
+
+function decodeVaultSeries(buf) {
+  const r = checkDisc(buf, "VaultSeries");
+  return { vault: r.pk(), series: r.pk(), short: r.u64(), long: r.u64(), closed: r.bool(), bump: r.u8() };
+}
+
 const seriesDiscriminator = () => ACC.Series;
 
 module.exports = {
   IDL, PROGRAM_ID, KIND, KIND_NAME, SLOT_HASHES, INSTRUCTIONS,
   configPda, seriesPda, longMintPda, vaultPda, positionPda, ata, underlyingBytes,
   initConfig, createSeries, fill, close, redeem, reclaim, settleFallback, settleOracle,
-  decodeConfig, decodeSeries, decodePosition, seriesDiscriminator,
+  lpVaultPda, sharesPda, cashPda, vaultLongPda, vaultSeriesPda,
+  createVault, vaultDeposit, vaultSell, vaultBuy, vaultCollect, vaultWithdraw,
+  decodeConfig, decodeSeries, decodePosition, decodeLpVault, decodeVaultSeries, seriesDiscriminator,
 };

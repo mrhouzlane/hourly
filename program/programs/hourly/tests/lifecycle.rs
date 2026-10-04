@@ -22,6 +22,7 @@ const T0: i64 = 1_791_158_400; // 2026-10-05 00:00 UTC
 const FEED: [u8; 32] = [9u8; 32];
 const SB_QUEUE: Pubkey = anchor_lang::pubkey!("EYiAmGSdsQTuCw413V5BzaruWuCCSDgTPtBGvLkXHbe7");
 const FALLBACK: i64 = hourly::FALLBACK_DELAY;
+const FEE_BPS: u16 = 100; // 1% of premium
 
 struct Env {
     svm: LiteSVM,
@@ -31,6 +32,7 @@ struct Env {
     taker: Keypair,
     usdc: Pubkey,
     config: Pubkey,
+    treasury: Pubkey,
 }
 
 fn pack_mint(authority: &Pubkey, decimals: u8) -> Vec<u8> {
@@ -104,14 +106,15 @@ fn setup() -> Env {
     let usdc = Keypair::new().pubkey();
     put_account(&mut svm, usdc, pack_mint(&admin.pubkey(), 6));
     let config = Pubkey::find_program_address(&[hourly::CONFIG_SEED], &hourly::id()).0;
+    let treasury = token_account(&mut svm, &usdc, &admin.pubkey(), 0);
     let ix = Instruction::new_with_bytes(
         hourly::id(),
-        &hourly::instruction::InitConfig { settler: settler.pubkey(), oracle_queue: SB_QUEUE }.data(),
-        hourly::accounts::InitConfig { admin: admin.pubkey(), config, quote_mint: usdc, system_program: SYSTEM }
+        &hourly::instruction::InitConfig { settler: settler.pubkey(), oracle_queue: SB_QUEUE, fee_bps: FEE_BPS }.data(),
+        hourly::accounts::InitConfig { admin: admin.pubkey(), config, quote_mint: usdc, treasury, system_program: SYSTEM }
             .to_account_metas(None),
     );
     send(&mut svm, &[ix], &admin, &[&admin]).unwrap();
-    Env { svm, admin, settler, maker, taker, usdc, config }
+    Env { svm, admin, settler, maker, taker, usdc, config, treasury }
 }
 
 struct S {
@@ -184,6 +187,7 @@ fn fill(e: &mut Env, s: &S, buyer: &Keypair, seller: &Keypair, buyer_q: Pubkey, 
             buyer_quote: buyer_q,
             seller_quote: seller_q,
             buyer_long,
+            treasury: e.treasury,
             position: position(&s.series, &seller.pubkey()),
             token_program: TOKEN,
             system_program: SYSTEM,
@@ -309,7 +313,8 @@ fn digital_full_lifecycle_pays_winner_and_returns_rest() {
     fill(&mut e, &s, &taker, &maker, tq, mq, tl, 50, 21 * USD, T0 + 30).unwrap();
     assert_eq!(balance(&e.svm, &tl), 50);
     assert_eq!(balance(&e.svm, &s.vault), 50 * USD);
-    assert_eq!(balance(&e.svm, &tq), 79 * USD);
+    assert_eq!(balance(&e.svm, &tq), 79 * USD - 210_000, "premium plus 1% fee");
+    assert_eq!(balance(&e.svm, &e.treasury), 210_000, "fee lands in the treasury");
     assert_eq!(balance(&e.svm, &mq), 1_000 * USD - 50 * USD + 21 * USD);
     let ser: Series = read(&e.svm, &s.series);
     assert_eq!(ser.open_interest, 50);
@@ -341,7 +346,7 @@ fn digital_full_lifecycle_pays_winner_and_returns_rest() {
     assert_eq!(ser.evidence, [7u8; 32]);
 
     redeem(&mut e, &s, &taker, tl, tq, 50).unwrap();
-    assert_eq!(balance(&e.svm, &tq), 79 * USD + 50 * USD);
+    assert_eq!(balance(&e.svm, &tq), 79 * USD - 210_000 + 50 * USD);
     reclaim(&mut e, &s, &maker, mq).unwrap();
     assert_eq!(balance(&e.svm, &s.vault), 0, "vault fully paid out");
     expect_code(reclaim(&mut e, &s, &maker, mq), "Custom(6002)"); // BadQty
@@ -364,7 +369,7 @@ fn call_spread_pays_capped_amount_and_vault_balances() {
     let settler = e.settler.insecure_clone();
     settle(&mut e, &s, &settler, 2_750_000).unwrap(); // average $2.75 -> $0.15/h -> $108 per contract
     redeem(&mut e, &s, &taker, tl, tq, 3).unwrap();
-    assert_eq!(balance(&e.svm, &tq), 1_000 * USD - 150 * USD + 3 * 108 * USD);
+    assert_eq!(balance(&e.svm, &tq), 1_000 * USD - 150 * USD - 1_500_000 + 3 * 108 * USD);
     reclaim(&mut e, &s, &maker, mq).unwrap();
     assert_eq!(balance(&e.svm, &mq), 10_000 * USD + 150 * USD - 3 * 108 * USD);
     assert_eq!(balance(&e.svm, &s.vault), 0);
@@ -386,7 +391,7 @@ fn put_out_of_the_money_returns_all_collateral_to_writer() {
     let settler = e.settler.insecure_clone();
     settle(&mut e, &s, &settler, 2_500_000).unwrap();
     redeem(&mut e, &s, &maker, ml, mq, 2).unwrap();
-    assert_eq!(balance(&e.svm, &mq), 1_000 * USD - 20 * USD, "worthless put pays nothing");
+    assert_eq!(balance(&e.svm, &mq), 1_000 * USD - 20 * USD - 200_000, "worthless put pays nothing; buyer paid the fee");
     reclaim(&mut e, &s, &taker, tq).unwrap();
     assert_eq!(balance(&e.svm, &tq), 1_000 * USD + 20 * USD);
     assert_eq!(balance(&e.svm, &s.vault), 0);
@@ -448,4 +453,217 @@ fn rejects_bad_fills_and_bad_listings() {
     // after expiry no new fills
     set_time(&mut e.svm, expiry);
     expect_code(fill(&mut e, &s, &taker, &maker, tq, mq, tl, 1, 0, expiry + 30), "Custom(6004)"); // Expired
+}
+
+
+// ---------------- underwriting vault ----------------
+
+struct V {
+    vault: Pubkey,
+    shares: Pubkey,
+    cash: Pubkey,
+}
+
+fn vault_pdas(e: &Env, epoch: u32) -> V {
+    let vault = Pubkey::find_program_address(&[hourly::LPV_SEED, e.config.as_ref(), &epoch.to_le_bytes()], &hourly::id()).0;
+    let shares = Pubkey::find_program_address(&[hourly::LPV_SHARES_SEED, vault.as_ref()], &hourly::id()).0;
+    let cash = Pubkey::find_program_address(&[hourly::LPV_CASH_SEED, vault.as_ref()], &hourly::id()).0;
+    V { vault, shares, cash }
+}
+
+fn vseries(v: &V, series: &Pubkey) -> Pubkey {
+    Pubkey::find_program_address(&[hourly::LPV_SERIES_SEED, v.vault.as_ref(), series.as_ref()], &hourly::id()).0
+}
+fn vlong(v: &V, series: &Pubkey) -> Pubkey {
+    Pubkey::find_program_address(&[hourly::LPV_LONG_SEED, v.vault.as_ref(), series.as_ref()], &hourly::id()).0
+}
+
+fn create_vault(e: &mut Env, epoch: u32, quoter: Pubkey, deposit_end: i64, epoch_end: i64, bps: u16) -> V {
+    let v = vault_pdas(e, epoch);
+    let ix = Instruction::new_with_bytes(
+        hourly::id(),
+        &hourly::instruction::CreateVault { epoch, quoter, deposit_end, epoch_end, max_series_bps: bps }.data(),
+        hourly::accounts::CreateVault {
+            admin: e.admin.pubkey(), config: e.config, quote_mint: e.usdc, lp_vault: v.vault,
+            share_mint: v.shares, cash: v.cash, token_program: TOKEN, system_program: SYSTEM,
+        }
+        .to_account_metas(None),
+    );
+    let admin = e.admin.insecure_clone();
+    send(&mut e.svm, &[ix], &admin, &[&admin]).unwrap();
+    v
+}
+
+fn deposit(e: &mut Env, v: &V, who: &Keypair, quote: Pubkey, shares_acct: Pubkey, amount: u64) -> Result<(), String> {
+    let ix = Instruction::new_with_bytes(
+        hourly::id(),
+        &hourly::instruction::VaultDeposit { amount }.data(),
+        hourly::accounts::VaultDeposit {
+            depositor: who.pubkey(), config: e.config, lp_vault: v.vault, share_mint: v.shares, cash: v.cash,
+            depositor_quote: quote, depositor_shares: shares_acct, token_program: TOKEN,
+        }
+        .to_account_metas(None),
+    );
+    let admin = e.admin.insecure_clone();
+    send(&mut e.svm, &[ix], &admin, &[&admin, who])
+}
+
+#[allow(clippy::too_many_arguments)]
+fn vault_sell(e: &mut Env, v: &V, s: &S, quoter: &Keypair, taker: &Keypair, taker_quote: Pubkey, taker_long: Pubkey, qty: u64, premium: u64) -> Result<(), String> {
+    let ix = Instruction::new_with_bytes(
+        hourly::id(),
+        &hourly::instruction::VaultSell { qty, premium, quote_expiry: i64::MAX }.data(),
+        hourly::accounts::VaultSell {
+            payer: e.admin.pubkey(), quoter: quoter.pubkey(), taker: taker.pubkey(), config: e.config,
+            lp_vault: v.vault, cash: v.cash, treasury: e.treasury, series: s.series, long_mint: s.long_mint,
+            vault: s.vault, taker_quote, taker_long, position: position(&s.series, &v.vault),
+            vault_series: vseries(v, &s.series), token_program: TOKEN, system_program: SYSTEM,
+        }
+        .to_account_metas(None),
+    );
+    let admin = e.admin.insecure_clone();
+    send(&mut e.svm, &[ix], &admin, &[&admin, quoter, taker])
+}
+
+#[allow(clippy::too_many_arguments)]
+fn vault_buy(e: &mut Env, v: &V, s: &S, quoter: &Keypair, taker: &Keypair, taker_quote: Pubkey, qty: u64, premium: u64) -> Result<(), String> {
+    let ix = Instruction::new_with_bytes(
+        hourly::id(),
+        &hourly::instruction::VaultBuy { qty, premium, quote_expiry: i64::MAX }.data(),
+        hourly::accounts::VaultBuy {
+            payer: e.admin.pubkey(), quoter: quoter.pubkey(), taker: taker.pubkey(), config: e.config,
+            lp_vault: v.vault, cash: v.cash, treasury: e.treasury, series: s.series, long_mint: s.long_mint,
+            vault: s.vault, taker_quote, vault_long: vlong(v, &s.series), position: position(&s.series, &taker.pubkey()),
+            vault_series: vseries(v, &s.series), token_program: TOKEN, system_program: SYSTEM,
+        }
+        .to_account_metas(None),
+    );
+    let admin = e.admin.insecure_clone();
+    send(&mut e.svm, &[ix], &admin, &[&admin, quoter, taker])
+}
+
+fn vault_collect(e: &mut Env, v: &V, s: &S, has_long: bool, has_short: bool) -> Result<(), String> {
+    let ix = Instruction::new_with_bytes(
+        hourly::id(),
+        &hourly::instruction::VaultCollect {}.data(),
+        hourly::accounts::VaultCollect {
+            config: e.config, lp_vault: v.vault, cash: v.cash, series: s.series, long_mint: s.long_mint, vault: s.vault,
+            vault_series: vseries(v, &s.series),
+            vault_long: if has_long { Some(vlong(v, &s.series)) } else { None },
+            position: if has_short { Some(position(&s.series, &v.vault)) } else { None },
+            token_program: TOKEN,
+        }
+        .to_account_metas(None),
+    );
+    let admin = e.admin.insecure_clone();
+    send(&mut e.svm, &[ix], &admin, &[&admin])
+}
+
+fn withdraw(e: &mut Env, v: &V, who: &Keypair, shares_acct: Pubkey, quote: Pubkey, shares: u64) -> Result<(), String> {
+    let ix = Instruction::new_with_bytes(
+        hourly::id(),
+        &hourly::instruction::VaultWithdraw { shares }.data(),
+        hourly::accounts::VaultWithdraw {
+            owner: who.pubkey(), config: e.config, lp_vault: v.vault, share_mint: v.shares, cash: v.cash,
+            owner_shares: shares_acct, owner_quote: quote, token_program: TOKEN,
+        }
+        .to_account_metas(None),
+    );
+    let admin = e.admin.insecure_clone();
+    send(&mut e.svm, &[ix], &admin, &[&admin, who])
+}
+
+#[test]
+fn vault_underwrites_an_epoch_and_pays_lps_pro_rata() {
+    let mut e = setup();
+    let deposit_end = T0 + DAY;
+    let epoch_end = T0 + 8 * DAY;
+    let quoter = e.maker.insecure_clone(); // the venue's pricing engine
+    let v = create_vault(&mut e, 1, quoter.pubkey(), deposit_end, epoch_end, 2_000); // 20% cap per series
+
+    // two LPs deposit 300 and 100
+    let (lp1, lp2) = (Keypair::new(), Keypair::new());
+    for k in [&lp1, &lp2] { e.svm.airdrop(&k.pubkey(), 1_000_000_000).unwrap(); }
+    let lp1q = token_account(&mut e.svm, &e.usdc, &lp1.pubkey(), 300 * USD);
+    let lp2q = token_account(&mut e.svm, &e.usdc, &lp2.pubkey(), 100 * USD);
+    let lp1s = token_account(&mut e.svm, &v.shares, &lp1.pubkey(), 0);
+    let lp2s = token_account(&mut e.svm, &v.shares, &lp2.pubkey(), 0);
+    deposit(&mut e, &v, &lp1, lp1q, lp1s, 300 * USD).unwrap();
+    deposit(&mut e, &v, &lp2, lp2q, lp2s, 100 * USD).unwrap();
+    assert_eq!(balance(&e.svm, &v.cash), 400 * USD);
+    assert_eq!(balance(&e.svm, &lp1s), 300 * USD);
+
+    // a series inside the epoch
+    let expiry = T0 + 5 * DAY;
+    let s = create_series(&mut e, true, KIND_DIGITAL, 2_700_000, USD, 1, T0 + 4 * DAY, expiry).unwrap();
+    let taker = e.taker.insecure_clone();
+    let tq = token_account(&mut e.svm, &e.usdc, &taker.pubkey(), 100 * USD);
+    let tl = token_account(&mut e.svm, &s.long_mint, &taker.pubkey(), 0);
+
+    // no trading during the deposit window
+    expect_code(vault_sell(&mut e, &v, &s, &quoter, &taker, tq, tl, 1, 400_000), "Custom(6018)"); // VaultNotTrading
+    set_time(&mut e.svm, deposit_end);
+    // no deposits once trading starts
+    expect_code(deposit(&mut e, &v, &lp2, lp2q, lp2s, 1), "Custom(6015)"); // VaultClosed
+    // only the vault's quoter can trade its capital
+    let stranger = Keypair::new();
+    e.svm.airdrop(&stranger.pubkey(), 1_000_000_000).unwrap();
+    expect_code(vault_sell(&mut e, &v, &s, &stranger, &taker, tq, tl, 1, 400_000), "Custom(6010)"); // Unauthorized
+
+    // the vault writes 50 YES at $0.40 to the taker
+    vault_sell(&mut e, &v, &s, &quoter, &taker, tq, tl, 50, 20 * USD).unwrap();
+    assert_eq!(balance(&e.svm, &tl), 50);
+    assert_eq!(balance(&e.svm, &v.cash), 400 * USD - 50 * USD + 20 * USD);
+    assert_eq!(balance(&e.svm, &tq), 100 * USD - 20 * USD - 200_000);
+    assert_eq!(balance(&e.svm, &e.treasury), 200_000);
+    // the cap: 20% of 400 = $80 of collateral in one series; 31 more would make 81
+    expect_code(vault_sell(&mut e, &v, &s, &quoter, &taker, tq, tl, 31, 0), "Custom(6017)"); // VaultLimit
+
+    // the vault also buys 10 contracts written by a second trader, at $0.30
+    let t2 = Keypair::new();
+    e.svm.airdrop(&t2.pubkey(), 1_000_000_000).unwrap();
+    let t2q = token_account(&mut e.svm, &e.usdc, &t2.pubkey(), 50 * USD);
+    vault_buy(&mut e, &v, &s, &quoter, &t2, t2q, 10, 3 * USD).unwrap();
+    assert_eq!(balance(&e.svm, &t2q), 50 * USD - 10 * USD + 3 * USD);
+    assert_eq!(balance(&e.svm, &vlong(&v, &s.series)), 10);
+    let vault_cash_after_trades = 400 * USD - 50 * USD + 20 * USD - 3 * USD - 30_000;
+    assert_eq!(balance(&e.svm, &v.cash), vault_cash_after_trades);
+    let vs: hourly::VaultSeries = read(&e.svm, &vseries(&v, &s.series));
+    assert_eq!((vs.short, vs.long, vs.closed), (50, 10, false));
+    let lv: hourly::LpVault = read(&e.svm, &v.vault);
+    assert_eq!((lv.open_series, lv.deposits, lv.premiums), (1, 400 * USD, 20 * USD));
+
+    // a series that outlives the epoch cannot be traded by this vault
+    let late = create_series(&mut e, true, KIND_DIGITAL, 2_800_000, USD, 1, T0 + 9 * DAY, T0 + 10 * DAY).unwrap();
+    let tl2 = token_account(&mut e.svm, &late.long_mint, &taker.pubkey(), 0);
+    expect_code(vault_sell(&mut e, &v, &late, &quoter, &taker, tq, tl2, 1, 400_000), "Custom(6019)"); // SeriesOutsideEpoch
+
+    // settle YES (print 2.80 > 2.70): the vault owes its 50 shorts, collects on its 10 longs
+    set_time(&mut e.svm, expiry + FALLBACK);
+    let settler = e.settler.insecure_clone();
+    settle(&mut e, &s, &settler, 2_800_000).unwrap();
+    // withdrawals stay locked until the epoch ends and the series is collected
+    expect_code(withdraw(&mut e, &v, &lp1, lp1s, lp1q, 1), "Custom(6016)"); // VaultLocked
+    vault_collect(&mut e, &v, &s, true, true).unwrap();
+    let lv: hourly::LpVault = read(&e.svm, &v.vault);
+    assert_eq!(lv.open_series, 0);
+    let cash = vault_cash_after_trades + 10 * USD; // long payoff; short collateral fully paid out
+    assert_eq!(balance(&e.svm, &v.cash), cash);
+    // collecting twice moves nothing and does not double count
+    vault_collect(&mut e, &v, &s, true, true).unwrap();
+    assert_eq!(balance(&e.svm, &v.cash), cash);
+
+    // the taker redeems 50 winning contracts
+    redeem(&mut e, &s, &taker, tl, tq, 50).unwrap();
+    assert_eq!(balance(&e.svm, &tq), 100 * USD - 20 * USD - 200_000 + 50 * USD);
+
+    // epoch over: LPs withdraw pro rata
+    set_time(&mut e.svm, epoch_end);
+    withdraw(&mut e, &v, &lp1, lp1s, lp1q, 300 * USD).unwrap();
+    let lp1_out = (cash as u128 * 300 / 400) as u64;
+    assert_eq!(balance(&e.svm, &lp1q), lp1_out);
+    withdraw(&mut e, &v, &lp2, lp2s, lp2q, 100 * USD).unwrap();
+    assert_eq!(balance(&e.svm, &lp2q), cash - lp1_out);
+    assert_eq!(balance(&e.svm, &v.cash), 0, "vault fully distributed");
+    assert_eq!(balance(&e.svm, &s.vault), 0, "series escrow fully paid out");
 }

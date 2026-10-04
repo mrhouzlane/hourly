@@ -2,6 +2,7 @@
 // oracle, and keeps the venue's maker stocked with test USDC.
 "use strict";
 const { PublicKey, Transaction } = require("@solana/web3.js");
+const bs58 = require("bs58");
 const chain = require("./chain");
 const ornn = require("./ornn");
 const venue = require("./venue");
@@ -11,6 +12,11 @@ const catalog = require("./catalog");
 const CROSSBAR_URL = process.env.CROSSBAR_URL || "https://crossbar.switchboardlabs.xyz";
 const FALLBACK_DELAY_S = 72 * 3600;
 const MAKER_FLOOR_USD = 2_000_000;
+// Weekly underwriting vaults. Epoch 1 trades the week starting Monday 5 Oct 2026.
+const EPOCH_BASE_S = Date.parse("2026-10-05T00:00:00Z") / 1000;
+const WEEK_S = 7 * 86400;
+const VAULT_CAP_BPS = 2_000; // at most 20% of a vault's deposits at risk in any one market
+const VENUE_SEED_USD = 25_000; // the venue's own deposit, shown as such in the app
 const MAKER_TOPUP_USD = 5_000_000;
 
 let sb = null; // lazy ESM imports
@@ -162,6 +168,88 @@ async function restockMaker() {
   }
 }
 
+// ---------- vaults ----------
+const epochStart = (n) => EPOCH_BASE_S + (n - 1) * WEEK_S;
+function currentEpoch(nowS = Math.floor(Date.now() / 1000)) {
+  return Math.max(1, Math.floor((nowS - EPOCH_BASE_S) / WEEK_S) + 1);
+}
+
+async function ensureVaults() {
+  const nowS = Math.floor(Date.now() / 1000);
+  const cur = currentEpoch(nowS);
+  const quoteMint = new PublicKey(venue.state.quoteMint);
+  venue.state.vaults = venue.state.vaults || {};
+  // the epoch trading now (or about to) and the next one, which takes deposits
+  for (const n of [cur, cur + 1]) {
+    const pda = chain.lpVaultPda(n);
+    const depositEnd = epochStart(n);
+    const epochEnd = epochStart(n + 1);
+    if (!(await venue.conn.getAccountInfo(pda))) {
+      await venue.send([chain.createVault({
+        admin: venue.keys.admin.publicKey, quoteMint, epoch: n, quoter: venue.keys.maker.publicKey,
+        depositEnd, epochEnd, maxSeriesBps: VAULT_CAP_BPS,
+      })], []);
+      log("vault created", n, pda.toBase58());
+    }
+    const v = venue.state.vaults[n] || { epoch: n, pubkey: pda.toBase58(), depositEnd, epochEnd, seeded: 0 };
+    venue.state.vaults[n] = v;
+    // the venue seeds each vault so it can trade from day one; LP deposits stack on top
+    if (!v.seeded && nowS < depositEnd) {
+      const maker = venue.keys.maker.publicKey;
+      const shares = chain.sharesPda(pda);
+      await venue.send([
+        venue.ataIx(shares, maker).ix,
+        chain.vaultDeposit({ epoch: n, depositor: maker, quoteMint, amount: BigInt(VENUE_SEED_USD * 1e6) }),
+      ], [venue.keys.maker]);
+      v.seeded = VENUE_SEED_USD;
+      log("vault seeded", n, VENUE_SEED_USD);
+    }
+  }
+  venue.save();
+}
+
+// Pull settled series back into every vault that touched them.
+async function collectVaults() {
+  const vs = await venue.conn.getProgramAccounts(chain.PROGRAM_ID, {
+    filters: [{ memcmp: { offset: 0, bytes: bs58.encode(Buffer.from(chain.IDL.accounts.find((a) => a.name === "VaultSeries").discriminator)) } }],
+  });
+  if (!vs.length) return;
+  const series = await market.listSeries({ fresh: true });
+  const byKey = new Map(series.map((s) => [s.pubkey.toBase58(), s]));
+  const vaultEpoch = new Map(Object.values(venue.state.vaults || {}).map((v) => [v.pubkey, v.epoch]));
+  for (const { account } of vs) {
+    const r = chain.decodeVaultSeries(account.data);
+    if (r.closed) continue;
+    const s = byKey.get(r.series.toBase58());
+    const epoch = vaultEpoch.get(r.vault.toBase58());
+    if (!s || !s.settled || !epoch) continue;
+    try {
+      const sig = await venue.send([chain.vaultCollect({ epoch, series: s.pubkey, hasLong: r.long > 0n, hasShort: r.short > 0n })], []);
+      log("vault collected", epoch, s.pubkey.toBase58(), sig);
+    } catch (e) { log("vault collect failed", epoch, e.message); }
+  }
+}
+
+async function readVaults() {
+  const out = [];
+  const quoteMint = venue.state.quoteMint;
+  for (const v of Object.values(venue.state.vaults || {}).sort((a, b) => a.epoch - b.epoch)) {
+    const a = await venue.conn.getAccountInfo(new PublicKey(v.pubkey));
+    if (!a) continue;
+    const d = chain.decodeLpVault(a.data);
+    const cash = await venue.conn.getTokenAccountBalance(d.cash).then((r) => Number(r.value.amount) / 1e6).catch(() => 0);
+    const supply = await venue.conn.getTokenSupply(d.shareMint).then((r) => Number(r.value.amount) / 1e6).catch(() => 0);
+    out.push({
+      epoch: d.epoch, pubkey: v.pubkey, shareMint: d.shareMint.toBase58(), quoteMint,
+      depositEnd: Number(d.depositEnd), epochEnd: Number(d.epochEnd),
+      deposits: Number(d.deposits) / 1e6, cash, shareSupply: supply,
+      premiums: Number(d.premiums) / 1e6, openSeries: d.openSeries, capBps: d.maxSeriesBps,
+      venueSeed: v.seeded || 0,
+    });
+  }
+  return out;
+}
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 let running = false;
@@ -171,8 +259,10 @@ async function tick() {
   try {
     await ornn.refreshAll();
     await settleDue();
+    await collectVaults();
     await rollListings();
     await restockMaker();
+    await ensureVaults();
   } catch (e) {
     log("tick error", e.message);
   } finally {
@@ -185,4 +275,7 @@ function start(intervalMs = 120_000) {
   return setInterval(tick, intervalMs);
 }
 
-module.exports = { start, tick, rollListings, settleDue, settleOracle, settleFallback, listOne, feedIdFor, restockMaker };
+module.exports = {
+  start, tick, rollListings, settleDue, settleOracle, settleFallback, listOne, feedIdFor, restockMaker,
+  ensureVaults, collectVaults, readVaults, currentEpoch, epochStart, VAULT_CAP_BPS,
+};

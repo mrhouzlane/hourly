@@ -126,6 +126,8 @@ const routes = {
       config: cfg ? { admin: cfg.admin.toBase58(), settler: cfg.settler.toBase58(), oracleQueue: cfg.oracleQueue.toBase58() } : null,
       maker: venue.keys.maker.publicKey.toBase58(),
       fallbackDelayHours: 72,
+      feeBps: venue.state.feeBps,
+      treasury: venue.state.treasury,
       volScale: model.VOL_SCALE,
       backtest,
       settlements: venue.state.settlements.slice(-50).reverse().map((s) => ({ ...s, url: venue.explorer(s.tx) })),
@@ -152,6 +154,17 @@ const routes = {
   "POST /api/quote": async (req, url, body, ip) => {
     if (!allow(`q:${ip}`, 40, 60_000)) throw venue.httpError(429, "Too many quotes. Wait a minute.");
     return market.quote({ legs: body.legs, seriesId: body.series, side: body.side, qty: body.qty, owner: body.owner });
+  },
+
+  "GET /api/vaults": async () => {
+    const nowS = Math.floor(Date.now() / 1000);
+    const list = await keeper.readVaults();
+    return list.map((v) => ({ ...v, phase: market.vaultPhase({ depositEnd: v.depositEnd, epochEnd: v.epochEnd, openSeries: v.openSeries }, nowS) }));
+  },
+
+  "POST /api/vault": async (req, url, body, ip) => {
+    if (!allow(`v:${ip}`, 20, 60_000)) throw venue.httpError(429, "Too many requests. Wait a minute.");
+    return market.vaultAction({ type: body.type, epoch: Number(body.epoch), owner: body.owner, amount: body.amount });
   },
 
   "POST /api/action": async (req, url, body, ip) => {

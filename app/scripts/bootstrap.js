@@ -22,19 +22,26 @@ const ornn = require("../engine/ornn");
   }
   const quoteMint = new PublicKey(venue.state.quoteMint);
 
+  // protocol fee treasury: the admin's test USDC account
+  const t = venue.ataIx(quoteMint, venue.keys.admin.publicKey);
+  if (!venue.state.treasury) {
+    await venue.send([t.ix], []);
+    venue.state.treasury = t.ata.toBase58();
+    venue.save();
+  }
   let cfg = await venue.readConfig();
   if (!cfg) {
     await venue.send([chain.initConfig({
       admin: venue.keys.admin.publicKey, settler: venue.keys.settler.publicKey,
-      oracleQueue: venue.ORACLE_QUEUE, quoteMint,
+      oracleQueue: venue.ORACLE_QUEUE, quoteMint, treasury: new PublicKey(venue.state.treasury), feeBps: venue.state.feeBps,
     })], []);
     cfg = await venue.readConfig();
     console.log("config initialised");
   }
   if (!cfg.quoteMint.equals(quoteMint)) throw new Error(`config quote mint ${cfg.quoteMint} != state ${quoteMint}`);
-  console.log("config", { admin: cfg.admin.toBase58(), settler: cfg.settler.toBase58(), oracleQueue: cfg.oracleQueue.toBase58() });
-
+  console.log("config", { admin: cfg.admin.toBase58(), settler: cfg.settler.toBase58(), oracleQueue: cfg.oracleQueue.toBase58(), treasury: cfg.treasury.toBase58(), feeBps: cfg.feeBps });
   await keeper.restockMaker();
+  await keeper.ensureVaults();
   console.log(await ornn.refreshAll());
   const n = await keeper.rollListings();
   console.log(`listed ${n} new markets; total ${Object.keys(venue.state.series).length}`);

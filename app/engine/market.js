@@ -123,9 +123,36 @@ async function markets() {
   return out;
 }
 
+function vaultPhase(d, nowS) {
+  if (nowS < Number(d.depositEnd)) return "deposits";
+  if (nowS < Number(d.epochEnd)) return "trading";
+  return d.openSeries > 0 ? "settling" : "withdrawable";
+}
+
+// The weekly vault trading now, if this series settles inside its epoch.
+function tradingVaultFor(s, nowS) {
+  for (const v of Object.values(venue.state.vaults || {})) {
+    if (nowS >= v.depositEnd && nowS < v.epochEnd && Number(s.expiry) <= v.epochEnd) return v;
+  }
+  return null;
+}
+
+async function vaultRoom(v, s) {
+  const [va, vsa] = await venue.conn.getMultipleAccountsInfo([new PublicKey(v.pubkey), chain.vaultSeriesPda(v.pubkey, s.pubkey)]);
+  if (!va) return null;
+  const d = chain.decodeLpVault(va.data);
+  const vs = vsa ? chain.decodeVaultSeries(vsa.data) : { short: 0n, long: 0n };
+  const cash = BigInt((await venue.conn.getTokenAccountBalance(d.cash)).value.amount);
+  return { capAtoms: (d.deposits * BigInt(d.maxSeriesBps)) / 10_000n, short: vs.short, long: vs.long, cash };
+}
+
+const feeOf = (premiumAtoms) => (premiumAtoms * BigInt(venue.state.feeBps || 0)) / 10_000n;
+
 // A quote is one or more legs filled atomically in one transaction.
-// side: "buy" = user buys the contract from the venue's maker (pays ask);
-//       "sell" = user writes the contract to the maker (posts collateral, receives bid).
+// side: "buy" = user buys the contract (pays ask plus the protocol fee);
+//       "sell" = user writes the contract (posts collateral, receives bid).
+// Each leg is routed to the weekly underwriting vault when it has room under
+// its on-chain cap, otherwise to the venue's desk.
 async function quote({ legs, seriesId, side, qty, owner }) {
   if (!legs) legs = [{ series: seriesId, side, qty }];
   if (!Array.isArray(legs) || legs.length < 1 || legs.length > 2) throw venue.httpError(400, "one or two legs per quote");
@@ -135,10 +162,11 @@ async function quote({ legs, seriesId, side, qty, owner }) {
   const list = await listSeries();
   const nowS = Math.floor(Date.now() / 1000);
   const quoteMint = new PublicKey(venue.state.quoteMint);
+  const treasury = new PublicKey(venue.state.treasury);
   const maker = venue.keys.maker.publicKey;
   const ixs = [venue.ataIx(quoteMint, user).ix];
   const outLegs = [];
-  let payAtoms = 0n, receiveAtoms = 0n, lockAtoms = 0n;
+  let payAtoms = 0n, feeAtoms = 0n, receiveAtoms = 0n, lockAtoms = 0n;
   const seen = new Set();
   for (const leg of legs) {
     if (!["buy", "sell"].includes(leg.side)) throw venue.httpError(400, "side must be buy or sell");
@@ -155,32 +183,56 @@ async function quote({ legs, seriesId, side, qty, owner }) {
     const unit = leg.side === "buy" ? p.ask : p.bid;
     if (leg.side === "sell" && unit <= 0) throw venue.httpError(409, "The desk has no bid on this contract right now.");
     const premiumAtoms = BigInt(Math.round(unit * q * USD));
-    const collateralAtoms = BigInt(s.cap) * BigInt(s.units) * BigInt(q);
-    if (leg.side === "buy") {
-      payAtoms += premiumAtoms;
-      const makerPos = (await venue.positions(maker, [s.pubkey]))[s.pubkey.toBase58()] || 0n;
-      if (makerPos + BigInt(q) > BigInt(lim.makerMaxShort)) throw venue.httpError(409, "The desk is at its risk limit on this market.");
-    } else {
-      receiveAtoms += premiumAtoms;
-      lockAtoms += collateralAtoms;
+    const fee = feeOf(premiumAtoms);
+    const per = BigInt(s.cap) * BigInt(s.units);
+    const collateralAtoms = per * BigInt(q);
+
+    // route: weekly vault if it has room, else the desk
+    let via = "desk";
+    const v = tradingVaultFor(s, nowS);
+    if (v) {
+      const room = await vaultRoom(v, s);
+      if (room) {
+        const ok = leg.side === "buy"
+          ? (room.short + BigInt(q)) * per <= room.capAtoms && room.cash >= collateralAtoms
+          : (room.long + BigInt(q)) * per <= room.capAtoms && room.cash >= premiumAtoms + fee;
+        if (ok) via = "vault";
+      }
     }
-    const buyer = leg.side === "buy" ? user : maker;
-    const seller = leg.side === "buy" ? maker : user;
-    ixs.push(venue.ataIx(chain.longMintPda(s.pubkey), buyer).ix);
-    ixs.push(chain.fill({
-      payer: venue.keys.admin.publicKey, buyer, seller, series: s.pubkey, quoteMint,
-      qty: q, premium: premiumAtoms, quoteExpiry: nowS + QUOTE_LIFETIME_S,
-    }));
+    if (via === "vault") {
+      const args = { payer: venue.keys.admin.publicKey, quoter: maker, taker: user, epoch: v.epoch, series: s.pubkey, quoteMint, treasury, qty: q, premium: premiumAtoms, quoteExpiry: nowS + QUOTE_LIFETIME_S };
+      if (leg.side === "buy") {
+        ixs.push(venue.ataIx(chain.longMintPda(s.pubkey), user).ix);
+        ixs.push(chain.vaultSell(args));
+      } else {
+        ixs.push(chain.vaultBuy(args));
+      }
+    } else {
+      if (leg.side === "buy") {
+        const makerPos = (await venue.positions(maker, [s.pubkey]))[s.pubkey.toBase58()] || 0n;
+        if (makerPos + BigInt(q) > BigInt(lim.makerMaxShort)) throw venue.httpError(409, "The desk is at its risk limit on this market.");
+      }
+      const buyer = leg.side === "buy" ? user : maker;
+      const seller = leg.side === "buy" ? maker : user;
+      ixs.push(venue.ataIx(chain.longMintPda(s.pubkey), buyer).ix);
+      ixs.push(chain.fill({
+        payer: venue.keys.admin.publicKey, buyer, seller, series: s.pubkey, quoteMint, treasury,
+        qty: q, premium: premiumAtoms, quoteExpiry: nowS + QUOTE_LIFETIME_S,
+      }));
+    }
+    if (leg.side === "buy") { payAtoms += premiumAtoms; feeAtoms += fee; }
+    else { receiveAtoms += premiumAtoms; lockAtoms += collateralAtoms; }
     outLegs.push({
-      series: leg.series, title: s.meta.title, side: leg.side, qty: q, price: unit,
-      premium: Number(premiumAtoms) / USD, collateral: leg.side === "sell" ? Number(collateralAtoms) / USD : 0,
+      series: leg.series, title: s.meta.title, side: leg.side, qty: q, price: unit, via,
+      premium: Number(premiumAtoms) / USD, fee: leg.side === "buy" ? Number(fee) / USD : 0,
+      collateral: leg.side === "sell" ? Number(collateralAtoms) / USD : 0,
       model: { fair: p.fair, bid: p.bid, ask: p.ask },
     });
   }
   // the program moves the seller's collateral before the buyer's premium, so a
   // writer needs the full collateral up front even if premium comes back in
   const userBal = (await venue.tokenBalances(user, [quoteMint.toBase58()]))[quoteMint.toBase58()] || 0n;
-  const need = payAtoms + lockAtoms;
+  const need = payAtoms + feeAtoms + lockAtoms;
   if (userBal < need) {
     throw venue.httpError(402, lockAtoms > 0n
       ? `This trade needs $${(Number(need) / USD).toLocaleString("en-US", { maximumFractionDigits: 2 })} of test USDC, including collateral. Use the faucet or trade fewer.`
@@ -189,11 +241,40 @@ async function quote({ legs, seriesId, side, qty, owner }) {
   const first = outLegs[0];
   const meta = {
     kind: "fill", series: first.series, side: first.side, qty: first.qty, price: first.price, title: outLegs.map((l) => l.title).join(" + "),
-    legs: outLegs, pay: Number(payAtoms) / USD, receive: Number(receiveAtoms) / USD, lock: Number(lockAtoms) / USD,
+    legs: outLegs, pay: Number(payAtoms) / USD, fee: Number(feeAtoms) / USD, receive: Number(receiveAtoms) / USD, lock: Number(lockAtoms) / USD,
     premium: first.premium, collateral: first.collateral, user: user.toBase58(),
   };
-  const prepared = await venue.prepareUserTx({ ixs, user, venueSigners: [venue.keys.maker], meta, units: 110_000 * outLegs.length + 30_000 });
+  const prepared = await venue.prepareUserTx({ ixs, user, venueSigners: [venue.keys.maker], meta, units: 140_000 * outLegs.length + 40_000 });
   return { ...prepared, ...meta, expiresIn: QUOTE_LIFETIME_S };
+}
+
+// LP actions: deposit into a vault before its week starts, withdraw after it settles.
+async function vaultAction({ type, epoch, owner, amount }) {
+  let user;
+  try { user = new PublicKey(owner); } catch (_) { throw venue.httpError(400, "bad wallet address"); }
+  const v = (venue.state.vaults || {})[epoch];
+  if (!v) throw venue.httpError(404, "unknown vault");
+  const nowS = Math.floor(Date.now() / 1000);
+  const quoteMint = new PublicKey(venue.state.quoteMint);
+  const shares = chain.sharesPda(v.pubkey);
+  const ixs = [];
+  if (type === "deposit") {
+    if (nowS >= v.depositEnd) throw venue.httpError(409, "Deposits for this week are closed.");
+    const usd = Number(amount);
+    if (!(usd >= 1)) throw venue.httpError(400, "Deposit at least $1.");
+    const atoms = BigInt(Math.round(usd * USD));
+    const bal = (await venue.tokenBalances(user, [quoteMint.toBase58()]))[quoteMint.toBase58()] || 0n;
+    if (bal < atoms) throw venue.httpError(402, "Not enough test USDC. Use the faucet first.");
+    ixs.push(venue.ataIx(shares, user).ix, chain.vaultDeposit({ epoch: v.epoch, depositor: user, quoteMint, amount: atoms }));
+  } else if (type === "withdraw") {
+    const held = (await venue.tokenBalances(user, [shares.toBase58()]))[shares.toBase58()] || 0n;
+    if (held <= 0n) throw venue.httpError(400, "No shares in this vault.");
+    ixs.push(venue.ataIx(quoteMint, user).ix, chain.vaultWithdraw({ epoch: v.epoch, owner: user, quoteMint, shares: held }));
+  } else {
+    throw venue.httpError(400, "unknown vault action");
+  }
+  const meta = { kind: `vault-${type}`, epoch: v.epoch, user: user.toBase58(), amount: Number(amount) || null };
+  return { ...(await venue.prepareUserTx({ ixs, user, meta, units: 120_000 })), ...meta };
 }
 
 // Post-trade actions a user signs: redeem a settled long, reclaim collateral,
@@ -252,7 +333,25 @@ async function portfolio(owner) {
       lockedCollateral: short * v.collateralPerContract,
     });
   }
-  return { owner: user.toBase58(), usdc: Number(bals[quoteMint] || 0n) / USD, rows };
+  // vault shares: value = share of the vault's cash now; locked collateral returns after settlement
+  const vaults = [];
+  for (const v of Object.values(venue.state.vaults || {})) {
+    const sm = chain.sharesPda(v.pubkey).toBase58();
+    const held = (await venue.tokenBalances(user, [sm]))[sm] || 0n;
+    if (held <= 0n) continue;
+    const a = await venue.conn.getAccountInfo(new PublicKey(v.pubkey));
+    if (!a) continue;
+    const d = chain.decodeLpVault(a.data);
+    const supply = BigInt((await venue.conn.getTokenSupply(d.shareMint)).value.amount);
+    const cash = BigInt((await venue.conn.getTokenAccountBalance(d.cash)).value.amount);
+    vaults.push({
+      epoch: v.epoch, shares: Number(held) / USD, share: supply > 0n ? Number(held) / Number(supply) : 0,
+      cashValue: supply > 0n ? Number((cash * held) / supply) / USD : 0,
+      phase: vaultPhase(d, nowS),
+      depositEnd: Number(d.depositEnd), epochEnd: Number(d.epochEnd),
+    });
+  }
+  return { owner: user.toBase58(), usdc: Number(bals[quoteMint] || 0n) / USD, rows, vaults };
 }
 
-module.exports = { listSeries, markets, quote, action, portfolio, price, calibration };
+module.exports = { listSeries, markets, quote, action, vaultAction, vaultPhase, portfolio, price, calibration };

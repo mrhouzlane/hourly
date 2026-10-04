@@ -51,3 +51,11 @@ Deadline: submissions due 2026-10-12 (verified colosseum.com/worldsfair).
 - [x] Preview LIVE http://34.177.105.21/hourly/ (:7990, private chain, cron run.sh). Caddy backup caddy-docker.conf.bak-hourly-20261004171134
 - [ ] 2 devnet deploy: BLOCKED on SOL (asked Mehdi again 17:05)
 - [ ] 6 submission kit: README, GTM, pitch + demo scripts, third-party maker example
+
+## Checkpoint 2026-10-04 ~17:30 UTC
+- Markets UI redesigned on Mehdi's note ("ui nice but not for the markets"): headline question + strike/cone chart, ladder by GPU, hedge builder with payout over model distribution. Screenshot-verified desktop + phone.
+- Trading cutoff 19:55 UTC on the window's last day (print lands 20:00/21:00 UTC); found by lifecycle test.
+- Preview chain runs the `preview` build (backup settles at expiry, labelled preview). Lifecycle list/trade/settle/redeem/reclaim verified on a scratch chain, balances exact.
+- devnet-pow: compiles only with libssl-dev (no sudo) AND needs >= 5000 lamports to start. Dead end without Mehdi's SOL.
+- Running in background: launch video (ship-video fork), research agents -> research/market-structure.md, research/investors-and-colosseum.md
+- NEXT (batched program change after research): protocol fee to treasury, liquidity design (LP vault or resting offers), then fresh preview chain.

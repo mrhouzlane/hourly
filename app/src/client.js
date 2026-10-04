@@ -248,7 +248,69 @@ const lastPrint = (code) => { const g = S.index.find((x) => x.code === code); re
 const historyOf = (code) => { const g = S.index.find((x) => x.code === code); return g ? g.history : []; };
 
 function renderMarkets() {
-  if (S.door === "predict") renderPredict(); else renderHedge();
+  if (S.door === "predict") renderPredict(); else if (S.door === "hedge") renderHedge(); else renderEarn();
+}
+
+// ----- earn: weekly underwriting vaults -----
+const weekLabel = (startS, endS) => `${dayLabel(new Date(startS * 1000).toISOString().slice(0, 10))} to ${dayLabel(new Date((endS - 86400) * 1000).toISOString().slice(0, 10))}`;
+
+function renderEarn() {
+  const list = $("#market-list");
+  $("#door-note").textContent = "Deposit test USDC into a weekly vault. It sells that week's GPU price questions to traders: you keep the premium and pay the winners.";
+  const vs = S.vaults || [];
+  const open = vs.filter((v) => v.phase === "deposits").sort((a, b) => a.epoch - b.epoch)[0];
+  const live = vs.find((v) => v.phase === "trading");
+  if (!open && !live) { list.innerHTML = '<p class="empty">No vault is open right now.</p>'; return; }
+  const capPct = `${((open || live).capBps / 100).toFixed(0)}%`;
+  list.innerHTML = `
+    <div class="builder">
+      <div class="builder-text">
+        ${open ? `
+        <div class="label muted">Deposits close in ${countdown(open.depositEnd)}</div>
+        <h3>Underwrite ${esc(weekLabel(open.depositEnd, open.epochEnd))}.</h3>
+        <div class="feature-num">${usd(open.deposits, 0)}<small>in the vault so far, including the venue's own ${usd(open.venueSeed, 0)}</small></div>
+        <p class="builder-line">No single market can use more than ${capPct} of the vault.</p>
+        <p class="builder-line">Withdraw after the week's markets settle. There is no early exit.</p>
+        <div class="deposit-row">
+          <input id="dep-amt" inputmode="decimal" value="1000" aria-label="Amount in test USDC">
+          <button class="pill dark go-wide" type="button" id="dep-go">Deposit</button>
+        </div>
+        <p class="status" id="dep-status"></p>` : '<h3>Deposits for next week open soon.</h3>'}
+      </div>
+      <div class="builder-text vault-live">
+        ${live ? `
+        <div class="label muted">Trading now, ${esc(weekLabel(live.depositEnd, live.epochEnd))}</div>
+        <div class="two-num">
+          <div><div class="n">${usd(live.deposits, 0)}</div><div class="l">deposited</div></div>
+          <div><div class="n">${usd(live.premiums, 2)}</div><div class="l">premium collected</div></div>
+        </div>
+        <p class="builder-line">${live.openSeries} market${live.openSeries === 1 ? "" : "s"} open. Premium so far is ${pct(live.deposits ? live.premiums / live.deposits : 0, 2)} of deposits, before any payouts.</p>` : `
+        <div class="label muted">No vault is trading yet</div>
+        <p class="builder-line">The first vault starts trading when its deposit window closes.</p>`}
+      </div>
+    </div>`;
+  if (open) $("#dep-go").addEventListener("click", () => ensureWallet(() => depositFlow(open)));
+}
+
+async function depositFlow(v) {
+  const st = $("#dep-status");
+  const amount = Number(($("#dep-amt") || {}).value);
+  if (!(amount >= 1)) { st.className = "status err"; st.textContent = "Enter at least $1."; return; }
+  st.className = "status";
+  st.textContent = S.wallet.kind === "burner" ? "Signing." : "Approve the deposit in your wallet.";
+  try {
+    const prepared = await api("vault", { type: "deposit", epoch: v.epoch, owner: S.wallet.address, amount });
+    const r = await signAndSubmit(prepared);
+    st.innerHTML = r.url ? `Deposited. <a href="${esc(r.url)}" target="_blank" rel="noopener">View the transaction</a>` : "Deposited.";
+    await Promise.all([refreshMarkets(), refreshPortfolio()]);
+  } catch (e) {
+    st.className = "status err";
+    st.innerHTML = esc(e.message);
+    if (/faucet/i.test(e.message)) {
+      st.innerHTML += ' <button class="pill small" type="button" id="dep-faucet">Add test USDC</button>';
+      $("#dep-faucet").addEventListener("click", faucet);
+    }
+  }
 }
 
 // ----- predict: one headline question, then a ladder grouped by GPU -----
@@ -457,7 +519,7 @@ function startPredict(id, side) {
     explain: (q) => {
       const n = q.legs[0].qty;
       return yes
-        ? [["Price", `${cents(q.legs[0].price)} each`], ["You pay", usd(q.pay)], ["Pays if yes", usd(n)]]
+        ? [["Price", `${cents(q.legs[0].price)} each`], ["Fee", usd(q.fee)], ["You pay", usd(q.pay + q.fee)], ["Pays if yes", usd(n)]]
         : [["You post", usd(q.lock)], ["You receive now", usd(q.receive)], ["Net cost", usd(q.lock - q.receive)], ["You get back if no", usd(n)]];
     },
   };
@@ -479,9 +541,10 @@ function startHedge(kind, putId, callId) {
       const rows = [];
       for (const l of q.legs) rows.push([l.side === "buy" ? `Buy ${l.title.split(" (")[0]}` : `Sell ${l.title.split(" (")[0]}`, `${usd(l.price)} each`]);
       if (q.pay) rows.push(["You pay", usd(q.pay)]);
+      if (q.fee) rows.push(["Fee", usd(q.fee)]);
       if (q.receive) rows.push(["You receive", usd(q.receive)]);
       if (q.lock) rows.push(["Locked until settlement", usd(q.lock, 0)]);
-      if (q.pay && q.receive) rows.push(["Net premium", usd(q.pay - q.receive)]);
+      if (q.pay && q.receive) rows.push(["Net premium", usd(q.pay + (q.fee || 0) - q.receive)]);
       return rows;
     },
   };
@@ -607,15 +670,31 @@ async function refreshPortfolio() {
     const when = r.status === "settled" ? "Settled" : r.status === "settling" ? "Settling now" : r.status === "closed" ? "Closed, print due" : `Trading closes in ${countdown(r.tradingEnd)}`;
     return `<div class="pf-row"><div><div class="t">${esc(positionTitle(r))}</div><div class="m">${when}</div></div><div>${pos}</div><div class="v">${value}</div><div class="act">${act}</div></div>`;
   }).join("");
+  const vaultRows = (p.vaults || []).map((v) => {
+    const label = `Vault, ${weekLabel(v.depositEnd, v.epochEnd)}`;
+    const when = { deposits: `Trading starts in ${countdown(v.depositEnd)}`, trading: `Week ends in ${countdown(v.epochEnd)}`, settling: "Collecting settled markets", withdrawable: "Ready to withdraw" }[v.phase];
+    const act = v.phase === "withdrawable" ? `<button class="pill small" type="button" data-vw="${v.epoch}">Withdraw ${usd(v.cashValue)}</button>` : "";
+    return `<div class="pf-row"><div><div class="t">${esc(label)}</div><div class="m">${esc(when)}</div></div><div>${pct(v.share, 1)} of the vault</div><div class="v">${usd(v.cashValue)}<div class="m">cash share now</div></div><div class="act">${act}</div></div>`;
+  }).join("");
   body.innerHTML = `
     <div class="pf-top">
       <div class="pf-bal">${usd(p.usdc)}<small>Test USDC in ${esc(S.wallet.name.toLowerCase())}</small></div>
       <button class="pill" type="button" id="pf-faucet">Add 10,000 test USDC</button>
     </div>
     <p class="status" id="pf-status"></p>
-    ${p.rows.length ? `<div class="pf-row pf-head"><div>Market</div><div>Position</div><div class="v">Value</div><div class="act"></div></div>${rows}` : '<p class="empty">No positions yet. Pick a market above.</p>'}`;
+    ${p.rows.length || vaultRows ? `<div class="pf-row pf-head"><div>Market</div><div>Position</div><div class="v">Value</div><div class="act"></div></div>${rows}${vaultRows}` : '<p class="empty">No positions yet. Pick a market above.</p>'}`;
   $("#pf-faucet").addEventListener("click", faucet);
   $$("[data-act]").forEach((b) => b.addEventListener("click", () => runAction(b.dataset.act, b.dataset.s, b)));
+  $$("[data-vw]").forEach((b) => b.addEventListener("click", async () => {
+    const st = $("#pf-status");
+    b.disabled = true;
+    st.className = "status"; st.textContent = "Approve the withdrawal in your wallet.";
+    try {
+      const r = await signAndSubmit(await api("vault", { type: "withdraw", epoch: Number(b.dataset.vw), owner: S.wallet.address }));
+      st.innerHTML = r.url ? `Withdrawn. <a href="${esc(r.url)}" target="_blank" rel="noopener">View the transaction</a>` : "Withdrawn.";
+      await refreshPortfolio();
+    } catch (e) { st.className = "status err"; st.textContent = e.message; b.disabled = false; }
+  }));
 }
 
 async function runAction(type, series, btn) {
@@ -664,7 +743,13 @@ function renderSettlement() {
 
 // ---------- refresh loops ----------
 async function refreshIndex() { try { S.index = await api("index"); renderHero(); } catch (_) { /* keep last */ } }
-async function refreshMarkets() { try { S.markets = await api("markets"); renderMarkets(); renderSettlement(); } catch (e) { $("#market-list").innerHTML = `<p class="empty">${esc(e.message)}</p>`; } }
+async function refreshMarkets() {
+  try {
+    const [markets, vaults] = await Promise.all([api("markets"), api("vaults").catch(() => [])]);
+    S.markets = markets; S.vaults = vaults;
+    renderMarkets(); renderSettlement();
+  } catch (e) { $("#market-list").innerHTML = `<p class="empty">${esc(e.message)}</p>`; }
+}
 async function refreshStatus() { try { S.status = await api("status"); renderSettlement(); } catch (_) { /* keep last */ } }
 
 // ---------- motion ----------

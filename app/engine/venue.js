@@ -27,7 +27,7 @@ function loadKey(name) {
 const keys = { admin: loadKey("admin"), maker: loadKey("maker"), settler: loadKey("settler") };
 
 // ---------- persisted state ----------
-let state = { cluster: CLUSTER, quoteMint: null, series: {}, settlements: [], fills: [] };
+let state = { cluster: CLUSTER, quoteMint: null, treasury: null, feeBps: 100, series: {}, settlements: [], fills: [], vaults: {} };
 try { state = { ...state, ...JSON.parse(fs.readFileSync(STATE_FILE, "utf8")) }; } catch (_) { /* fresh */ }
 function save() {
   fs.mkdirSync(path.dirname(STATE_FILE), { recursive: true });

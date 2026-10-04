@@ -151,6 +151,15 @@ svg .ax { font: 400 12px var(--font); fill: var(--muted); }
 .toggle input { width: 18px; height: 18px; accent-color: var(--ink); }
 .go-wide { margin-top: 28px; height: 48px; padding: 0 28px; }
 
+/* earn */
+.deposit-row { display: flex; gap: 10px; align-items: center; margin-top: 24px; flex-wrap: wrap; }
+.deposit-row input { width: 140px; height: 48px; border: 1px solid var(--line); border-radius: 999px; text-align: center; font: inherit; font-size: 18px; background: var(--bg); }
+.deposit-row .go-wide { margin-top: 0; }
+.vault-live { align-self: stretch; background: var(--bg); border-radius: 24px; padding: 28px; }
+.two-num { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 18px; }
+.two-num .n { font-size: 36px; letter-spacing: -1px; line-height: 1.1; }
+.two-num .l { color: var(--muted); font-size: 12px; margin-top: 4px; }
+
 /* portfolio */
 .pf-top { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-top: 48px; flex-wrap: wrap; }
 .pf-bal { font-size: 56px; letter-spacing: -2px; line-height: 1; }

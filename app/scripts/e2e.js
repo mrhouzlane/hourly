@@ -22,7 +22,7 @@ const api = async (p, body) => {
 
   // 1) buy 10 YES, signing the full transaction like Wallet Standard signTransaction
   const q1 = await api("quote", { series: dig.id, side: "buy", qty: 10, owner });
-  console.log("quote buy", q1.qty, "@", q1.price, "premium", q1.premium);
+  console.log("quote buy", q1.qty, "@", q1.price, "pay", q1.pay, "fee", q1.fee, "via", q1.legs[0].via);
   const tx = Transaction.from(Buffer.from(q1.tx, "base64"));
   tx.partialSign(user);
   const s1 = await api("submit", { id: q1.id, tx: tx.serialize().toString("base64") });
@@ -50,6 +50,6 @@ const api = async (p, body) => {
   const p = await api(`portfolio?owner=${owner}`);
   console.log("usdc", p.usdc);
   for (const r of p.rows) console.log(" ", r.title, "long", r.long, "short", r.short, "locked", r.lockedCollateral, "mark", r.markPerContract?.toFixed?.(3));
-  const expectUsdc = 10000 - q1.premium - q2.collateral + q2.premium;
+  const expectUsdc = 10000 - q1.pay - q1.fee - q2.lock + q2.receive;
   console.log("expected usdc", expectUsdc.toFixed(2), Math.abs(expectUsdc - p.usdc) < 0.000001 ? "MATCH" : "MISMATCH");
 })().catch((e) => { console.error("E2E FAILED", e.message); process.exit(1); });

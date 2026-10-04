@@ -46,7 +46,7 @@ const api = async (p, body) => {
   const tx = new Transaction().add(
     spl.createAssociatedTokenAccountIdempotentInstruction(maker.publicKey, chain.ata(longMint, trader.publicKey), trader.publicKey, longMint),
     chain.fill({
-      payer: maker.publicKey, buyer: trader.publicKey, seller: maker.publicKey, series, quoteMint,
+      payer: maker.publicKey, buyer: trader.publicKey, seller: maker.publicKey, series, quoteMint, treasury: new PublicKey(status.treasury),
       qty, premium, quoteExpiry: Math.floor(Date.now() / 1000) + 60,
     }),
   );

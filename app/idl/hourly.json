@@ -264,6 +264,159 @@
       ]
     },
     {
+      "name": "create_vault",
+      "discriminator": [
+        29,
+        237,
+        247,
+        208,
+        193,
+        82,
+        54,
+        135
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "quote_mint",
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "lp_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  112,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "config"
+              },
+              {
+                "kind": "arg",
+                "path": "epoch"
+              }
+            ]
+          }
+        },
+        {
+          "name": "share_mint",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  112,
+                  115,
+                  104,
+                  97,
+                  114,
+                  101,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "lp_vault"
+              }
+            ]
+          }
+        },
+        {
+          "name": "cash",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  112,
+                  99,
+                  97,
+                  115,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "lp_vault"
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "epoch",
+          "type": "u32"
+        },
+        {
+          "name": "quoter",
+          "type": "pubkey"
+        },
+        {
+          "name": "deposit_end",
+          "type": "i64"
+        },
+        {
+          "name": "epoch_end",
+          "type": "i64"
+        },
+        {
+          "name": "max_series_bps",
+          "type": "u16"
+        }
+      ]
+    },
+    {
       "name": "fill",
       "docs": [
         "One RFQ fill. Buyer and seller both sign the same transaction:",
@@ -348,6 +501,10 @@
         },
         {
           "name": "buyer_long",
+          "writable": true
+        },
+        {
+          "name": "treasury",
           "writable": true
         },
         {
@@ -439,6 +596,9 @@
           "name": "quote_mint"
         },
         {
+          "name": "treasury"
+        },
+        {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
         }
@@ -451,6 +611,10 @@
         {
           "name": "oracle_queue",
           "type": "pubkey"
+        },
+        {
+          "name": "fee_bps",
+          "type": "u16"
         }
       ]
     },
@@ -621,6 +785,53 @@
         {
           "name": "qty",
           "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "set_fee",
+      "discriminator": [
+        18,
+        154,
+        24,
+        18,
+        237,
+        214,
+        19,
+        80
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "fee_bps",
+          "type": "u16"
         }
       ]
     },
@@ -800,6 +1011,685 @@
           "type": "u8"
         }
       ]
+    },
+    {
+      "name": "vault_buy",
+      "docs": [
+        "The vault buys `qty` contracts written by a taker."
+      ],
+      "discriminator": [
+        50,
+        62,
+        149,
+        247,
+        4,
+        116,
+        213,
+        250
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "quoter",
+          "signer": true,
+          "relations": [
+            "lp_vault"
+          ]
+        },
+        {
+          "name": "taker",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          },
+          "relations": [
+            "lp_vault",
+            "series"
+          ]
+        },
+        {
+          "name": "lp_vault",
+          "writable": true
+        },
+        {
+          "name": "cash",
+          "writable": true,
+          "relations": [
+            "lp_vault"
+          ]
+        },
+        {
+          "name": "treasury",
+          "writable": true
+        },
+        {
+          "name": "series",
+          "writable": true
+        },
+        {
+          "name": "long_mint",
+          "writable": true,
+          "relations": [
+            "series"
+          ]
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "relations": [
+            "series"
+          ]
+        },
+        {
+          "name": "taker_quote",
+          "writable": true
+        },
+        {
+          "name": "vault_long",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  112,
+                  108,
+                  111,
+                  110,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "lp_vault"
+              },
+              {
+                "kind": "account",
+                "path": "series"
+              }
+            ]
+          }
+        },
+        {
+          "name": "position",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "series"
+              },
+              {
+                "kind": "account",
+                "path": "taker"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault_series",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  112,
+                  115,
+                  101,
+                  114,
+                  105,
+                  101,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "lp_vault"
+              },
+              {
+                "kind": "account",
+                "path": "series"
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "qty",
+          "type": "u64"
+        },
+        {
+          "name": "premium",
+          "type": "u64"
+        },
+        {
+          "name": "quote_expiry",
+          "type": "i64"
+        }
+      ]
+    },
+    {
+      "name": "vault_collect",
+      "docs": [
+        "After settlement, pulls everything the vault is owed on one series back",
+        "into vault cash. Anyone can call it."
+      ],
+      "discriminator": [
+        51,
+        103,
+        109,
+        155,
+        81,
+        102,
+        189,
+        231
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          },
+          "relations": [
+            "lp_vault",
+            "series"
+          ]
+        },
+        {
+          "name": "lp_vault",
+          "writable": true
+        },
+        {
+          "name": "cash",
+          "writable": true,
+          "relations": [
+            "lp_vault"
+          ]
+        },
+        {
+          "name": "series"
+        },
+        {
+          "name": "long_mint",
+          "writable": true,
+          "relations": [
+            "series"
+          ]
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "relations": [
+            "series"
+          ]
+        },
+        {
+          "name": "vault_series",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  112,
+                  115,
+                  101,
+                  114,
+                  105,
+                  101,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "lp_vault"
+              },
+              {
+                "kind": "account",
+                "path": "series"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault_long",
+          "writable": true,
+          "optional": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  112,
+                  108,
+                  111,
+                  110,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "lp_vault"
+              },
+              {
+                "kind": "account",
+                "path": "series"
+              }
+            ]
+          }
+        },
+        {
+          "name": "position",
+          "writable": true,
+          "optional": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "series"
+              },
+              {
+                "kind": "account",
+                "path": "lp_vault"
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "vault_deposit",
+      "discriminator": [
+        231,
+        150,
+        41,
+        113,
+        180,
+        104,
+        162,
+        120
+      ],
+      "accounts": [
+        {
+          "name": "depositor",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          },
+          "relations": [
+            "lp_vault"
+          ]
+        },
+        {
+          "name": "lp_vault",
+          "writable": true
+        },
+        {
+          "name": "share_mint",
+          "writable": true,
+          "relations": [
+            "lp_vault"
+          ]
+        },
+        {
+          "name": "cash",
+          "writable": true,
+          "relations": [
+            "lp_vault"
+          ]
+        },
+        {
+          "name": "depositor_quote",
+          "writable": true
+        },
+        {
+          "name": "depositor_shares",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "vault_sell",
+      "docs": [
+        "The vault writes `qty` contracts to a taker. The quoter sets the price."
+      ],
+      "discriminator": [
+        24,
+        112,
+        147,
+        205,
+        47,
+        183,
+        178,
+        4
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "quoter",
+          "signer": true,
+          "relations": [
+            "lp_vault"
+          ]
+        },
+        {
+          "name": "taker",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          },
+          "relations": [
+            "lp_vault",
+            "series"
+          ]
+        },
+        {
+          "name": "lp_vault",
+          "writable": true
+        },
+        {
+          "name": "cash",
+          "writable": true,
+          "relations": [
+            "lp_vault"
+          ]
+        },
+        {
+          "name": "treasury",
+          "writable": true
+        },
+        {
+          "name": "series",
+          "writable": true
+        },
+        {
+          "name": "long_mint",
+          "writable": true,
+          "relations": [
+            "series"
+          ]
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "relations": [
+            "series"
+          ]
+        },
+        {
+          "name": "taker_quote",
+          "writable": true
+        },
+        {
+          "name": "taker_long",
+          "writable": true
+        },
+        {
+          "name": "position",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "series"
+              },
+              {
+                "kind": "account",
+                "path": "lp_vault"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault_series",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  112,
+                  115,
+                  101,
+                  114,
+                  105,
+                  101,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "lp_vault"
+              },
+              {
+                "kind": "account",
+                "path": "series"
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "qty",
+          "type": "u64"
+        },
+        {
+          "name": "premium",
+          "type": "u64"
+        },
+        {
+          "name": "quote_expiry",
+          "type": "i64"
+        }
+      ]
+    },
+    {
+      "name": "vault_withdraw",
+      "docs": [
+        "After the epoch ends and every series is collected, LPs burn shares for",
+        "their pro rata slice of vault cash."
+      ],
+      "discriminator": [
+        98,
+        28,
+        187,
+        98,
+        87,
+        69,
+        46,
+        64
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          },
+          "relations": [
+            "lp_vault"
+          ]
+        },
+        {
+          "name": "lp_vault",
+          "writable": true
+        },
+        {
+          "name": "share_mint",
+          "writable": true,
+          "relations": [
+            "lp_vault"
+          ]
+        },
+        {
+          "name": "cash",
+          "writable": true,
+          "relations": [
+            "lp_vault"
+          ]
+        },
+        {
+          "name": "owner_shares",
+          "writable": true
+        },
+        {
+          "name": "owner_quote",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": [
+        {
+          "name": "shares",
+          "type": "u64"
+        }
+      ]
     }
   ],
   "accounts": [
@@ -814,6 +1704,19 @@
         250,
         204,
         130
+      ]
+    },
+    {
+      "name": "LpVault",
+      "discriminator": [
+        189,
+        45,
+        167,
+        23,
+        91,
+        118,
+        105,
+        190
       ]
     },
     {
@@ -840,6 +1743,19 @@
         77,
         250,
         162
+      ]
+    },
+    {
+      "name": "VaultSeries",
+      "discriminator": [
+        79,
+        104,
+        60,
+        184,
+        227,
+        162,
+        183,
+        144
       ]
     }
   ],
@@ -946,6 +1862,31 @@
       "code": 6014,
       "name": "FallbackTooEarly",
       "msg": "fallback settlement is not open yet"
+    },
+    {
+      "code": 6015,
+      "name": "VaultClosed",
+      "msg": "vault deposits are closed"
+    },
+    {
+      "code": 6016,
+      "name": "VaultLocked",
+      "msg": "vault is locked until its epoch ends and every series is collected"
+    },
+    {
+      "code": 6017,
+      "name": "VaultLimit",
+      "msg": "trade exceeds the vault's exposure cap for this series"
+    },
+    {
+      "code": 6018,
+      "name": "VaultNotTrading",
+      "msg": "vault is not trading yet"
+    },
+    {
+      "code": 6019,
+      "name": "SeriesOutsideEpoch",
+      "msg": "series expires after the vault's epoch"
     }
   ],
   "types": [
@@ -969,6 +1910,14 @@
           {
             "name": "oracle_queue",
             "type": "pubkey"
+          },
+          {
+            "name": "treasury",
+            "type": "pubkey"
+          },
+          {
+            "name": "fee_bps",
+            "type": "u16"
           },
           {
             "name": "bump",
@@ -1001,6 +1950,66 @@
           {
             "name": "premium",
             "type": "u64"
+          },
+          {
+            "name": "fee",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LpVault",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "config",
+            "type": "pubkey"
+          },
+          {
+            "name": "epoch",
+            "type": "u32"
+          },
+          {
+            "name": "quoter",
+            "type": "pubkey"
+          },
+          {
+            "name": "share_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "cash",
+            "type": "pubkey"
+          },
+          {
+            "name": "deposit_end",
+            "type": "i64"
+          },
+          {
+            "name": "epoch_end",
+            "type": "i64"
+          },
+          {
+            "name": "deposits",
+            "type": "u64"
+          },
+          {
+            "name": "max_series_bps",
+            "type": "u16"
+          },
+          {
+            "name": "open_series",
+            "type": "u32"
+          },
+          {
+            "name": "premiums",
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
           }
         ]
       }
@@ -1144,6 +2153,38 @@
           {
             "name": "by_oracle",
             "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "VaultSeries",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "series",
+            "type": "pubkey"
+          },
+          {
+            "name": "short",
+            "type": "u64"
+          },
+          {
+            "name": "long",
+            "type": "u64"
+          },
+          {
+            "name": "closed",
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
           }
         ]
       }

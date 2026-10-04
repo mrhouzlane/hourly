@@ -35,6 +35,11 @@ pub const SERIES_SEED: &[u8] = b"series";
 pub const LONG_SEED: &[u8] = b"long";
 pub const VAULT_SEED: &[u8] = b"vault";
 pub const POSITION_SEED: &[u8] = b"pos";
+pub const LPV_SEED: &[u8] = b"lpvault";
+pub const LPV_SHARES_SEED: &[u8] = b"lpshares";
+pub const LPV_CASH_SEED: &[u8] = b"lpcash";
+pub const LPV_LONG_SEED: &[u8] = b"lplong";
+pub const LPV_SERIES_SEED: &[u8] = b"lpseries";
 
 pub const KIND_CALL: u8 = 0;
 pub const KIND_PUT: u8 = 1;
@@ -42,6 +47,9 @@ pub const KIND_DIGITAL: u8 = 2;
 
 pub const SLOT_HASHES_SYSVAR: Pubkey = pubkey!("SysvarS1otHashes111111111111111111111111111");
 pub const INSTRUCTIONS_SYSVAR: Pubkey = pubkey!("Sysvar1nstructions1111111111111111111111111");
+
+/// Protocol fee ceiling: 5% of premium.
+pub const MAX_FEE_BPS: u16 = 500;
 
 /// The trusted settler may act only this long after expiry. The `preview`
 /// build (private demo chain without Switchboard) settles at expiry instead.
@@ -58,8 +66,11 @@ const SB_TO_ATOMS: i128 = 1_000_000_000_000;
 pub mod hourly {
     use super::*;
 
-    pub fn init_config(ctx: Context<InitConfig>, settler: Pubkey, oracle_queue: Pubkey) -> Result<()> {
+    pub fn init_config(ctx: Context<InitConfig>, settler: Pubkey, oracle_queue: Pubkey, fee_bps: u16) -> Result<()> {
+        require!(fee_bps <= MAX_FEE_BPS, HourlyError::BadTerms);
         let c = &mut ctx.accounts.config;
+        c.treasury = ctx.accounts.treasury.key();
+        c.fee_bps = fee_bps;
         c.admin = ctx.accounts.admin.key();
         c.settler = settler;
         c.oracle_queue = oracle_queue;
@@ -70,6 +81,12 @@ pub mod hourly {
 
     pub fn set_settler(ctx: Context<AdminOnly>, settler: Pubkey) -> Result<()> {
         ctx.accounts.config.settler = settler;
+        Ok(())
+    }
+
+    pub fn set_fee(ctx: Context<AdminOnly>, fee_bps: u16) -> Result<()> {
+        require!(fee_bps <= MAX_FEE_BPS, HourlyError::BadTerms);
+        ctx.accounts.config.fee_bps = fee_bps;
         Ok(())
     }
 
@@ -162,6 +179,21 @@ pub mod hourly {
                 premium,
             )?;
         }
+        // protocol fee, paid by the buyer on top of the premium
+        let fee = fee_for(premium, ctx.accounts.config.fee_bps);
+        if fee > 0 {
+            token::transfer(
+                CpiContext::new(
+                    ctx.accounts.token_program.key(),
+                    Transfer {
+                        from: ctx.accounts.buyer_quote.to_account_info(),
+                        to: ctx.accounts.treasury.to_account_info(),
+                        authority: ctx.accounts.buyer.to_account_info(),
+                    },
+                ),
+                fee,
+            )?;
+        }
         let seeds = series_seeds(s);
         let bump = [s.bump];
         let signer: &[&[&[u8]]] = &[&[
@@ -206,6 +238,7 @@ pub mod hourly {
             seller: ctx.accounts.seller.key(),
             qty,
             premium,
+            fee,
         });
         Ok(())
     }
@@ -346,6 +379,375 @@ pub mod hourly {
         ctx.accounts.position.amount = 0;
         Ok(())
     }
+
+    // ---------- underwriting vaults ----------
+    // A vault pools LP deposits for one epoch. Deposits are taken before the
+    // epoch trades; during the epoch the venue's quoter trades the vault's
+    // capital within on-chain exposure caps; after every series it touched is
+    // settled and collected, LPs withdraw pro rata. No mark-to-model is needed
+    // because deposits and withdrawals only happen when the vault holds cash.
+
+    pub fn create_vault(
+        ctx: Context<CreateVault>,
+        epoch: u32,
+        quoter: Pubkey,
+        deposit_end: i64,
+        epoch_end: i64,
+        max_series_bps: u16,
+    ) -> Result<()> {
+        require!(deposit_end < epoch_end, HourlyError::BadTerms);
+        require!(max_series_bps > 0 && max_series_bps <= 10_000, HourlyError::BadTerms);
+        let v = &mut ctx.accounts.lp_vault;
+        v.config = ctx.accounts.config.key();
+        v.epoch = epoch;
+        v.quoter = quoter;
+        v.share_mint = ctx.accounts.share_mint.key();
+        v.cash = ctx.accounts.cash.key();
+        v.deposit_end = deposit_end;
+        v.epoch_end = epoch_end;
+        v.deposits = 0;
+        v.max_series_bps = max_series_bps;
+        v.open_series = 0;
+        v.premiums = 0;
+        v.bump = ctx.bumps.lp_vault;
+        Ok(())
+    }
+
+    pub fn vault_deposit(ctx: Context<VaultDeposit>, amount: u64) -> Result<()> {
+        require!(amount > 0, HourlyError::BadQty);
+        let now = Clock::get()?.unix_timestamp;
+        require!(now < ctx.accounts.lp_vault.deposit_end, HourlyError::VaultClosed);
+        token::transfer(
+            CpiContext::new(
+                ctx.accounts.token_program.key(),
+                Transfer {
+                    from: ctx.accounts.depositor_quote.to_account_info(),
+                    to: ctx.accounts.cash.to_account_info(),
+                    authority: ctx.accounts.depositor.to_account_info(),
+                },
+            ),
+            amount,
+        )?;
+        let v = &ctx.accounts.lp_vault;
+        let epoch = v.epoch.to_le_bytes();
+        let bump = [v.bump];
+        let signer: &[&[&[u8]]] = &[&[LPV_SEED, v.config.as_ref(), &epoch, &bump]];
+        token::mint_to(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_program.key(),
+                MintTo {
+                    mint: ctx.accounts.share_mint.to_account_info(),
+                    to: ctx.accounts.depositor_shares.to_account_info(),
+                    authority: ctx.accounts.lp_vault.to_account_info(),
+                },
+                signer,
+            ),
+            amount,
+        )?;
+        let v = &mut ctx.accounts.lp_vault;
+        v.deposits = v.deposits.checked_add(amount).ok_or(HourlyError::Overflow)?;
+        Ok(())
+    }
+
+    /// The vault writes `qty` contracts to a taker. The quoter sets the price.
+    pub fn vault_sell(ctx: Context<VaultSell>, qty: u64, premium: u64, quote_expiry: i64) -> Result<()> {
+        require!(qty > 0, HourlyError::BadQty);
+        let now = Clock::get()?.unix_timestamp;
+        require!(now <= quote_expiry, HourlyError::StaleQuote);
+        let s = &ctx.accounts.series;
+        let v = &ctx.accounts.lp_vault;
+        require!(now >= v.deposit_end, HourlyError::VaultNotTrading);
+        require!(!s.settled && now < s.expiry, HourlyError::Expired);
+        require!(s.expiry <= v.epoch_end, HourlyError::SeriesOutsideEpoch);
+        let per = collateral_per_contract(s)?;
+        let collateral = per.checked_mul(qty).ok_or(HourlyError::Overflow)?;
+        let new_short = ctx.accounts.vault_series.short.checked_add(qty).ok_or(HourlyError::Overflow)?;
+        require!(
+            (new_short as u128) * (per as u128) <= (v.deposits as u128) * (v.max_series_bps as u128) / 10_000,
+            HourlyError::VaultLimit
+        );
+        let epoch = v.epoch.to_le_bytes();
+        let vbump = [v.bump];
+        let vault_signer: &[&[&[u8]]] = &[&[LPV_SEED, v.config.as_ref(), &epoch, &vbump]];
+        // collateral: vault cash -> series escrow
+        token::transfer(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_program.key(),
+                Transfer {
+                    from: ctx.accounts.cash.to_account_info(),
+                    to: ctx.accounts.vault.to_account_info(),
+                    authority: ctx.accounts.lp_vault.to_account_info(),
+                },
+                vault_signer,
+            ),
+            collateral,
+        )?;
+        // premium and fee: taker -> vault cash, taker -> treasury
+        if premium > 0 {
+            token::transfer(
+                CpiContext::new(
+                    ctx.accounts.token_program.key(),
+                    Transfer {
+                        from: ctx.accounts.taker_quote.to_account_info(),
+                        to: ctx.accounts.cash.to_account_info(),
+                        authority: ctx.accounts.taker.to_account_info(),
+                    },
+                ),
+                premium,
+            )?;
+        }
+        let fee = fee_for(premium, ctx.accounts.config.fee_bps);
+        if fee > 0 {
+            token::transfer(
+                CpiContext::new(
+                    ctx.accounts.token_program.key(),
+                    Transfer {
+                        from: ctx.accounts.taker_quote.to_account_info(),
+                        to: ctx.accounts.treasury.to_account_info(),
+                        authority: ctx.accounts.taker.to_account_info(),
+                    },
+                ),
+                fee,
+            )?;
+        }
+        // long tokens to the taker
+        let seeds = series_seeds(s);
+        let sbump = [s.bump];
+        let series_signer: &[&[&[u8]]] = &[&[
+            SERIES_SEED, seeds.0.as_ref(), &s.underlying, &seeds.1, &seeds.2, &seeds.3, &seeds.4, &seeds.5, &sbump,
+        ]];
+        token::mint_to(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_program.key(),
+                MintTo {
+                    mint: ctx.accounts.long_mint.to_account_info(),
+                    to: ctx.accounts.taker_long.to_account_info(),
+                    authority: ctx.accounts.series.to_account_info(),
+                },
+                series_signer,
+            ),
+            qty,
+        )?;
+        let lp_key = ctx.accounts.lp_vault.key();
+        let series_key = ctx.accounts.series.key();
+        let p = &mut ctx.accounts.position;
+        if p.writer == Pubkey::default() {
+            p.writer = lp_key;
+            p.series = series_key;
+            p.bump = ctx.bumps.position;
+        }
+        p.amount = p.amount.checked_add(qty).ok_or(HourlyError::Overflow)?;
+        let vs = &mut ctx.accounts.vault_series;
+        if vs.vault == Pubkey::default() {
+            vs.vault = lp_key;
+            vs.series = series_key;
+            vs.bump = ctx.bumps.vault_series;
+            ctx.accounts.lp_vault.open_series += 1;
+        }
+        vs.short = new_short;
+        let s = &mut ctx.accounts.series;
+        s.open_interest = s.open_interest.checked_add(qty).ok_or(HourlyError::Overflow)?;
+        let v = &mut ctx.accounts.lp_vault;
+        v.premiums = v.premiums.checked_add(premium).ok_or(HourlyError::Overflow)?;
+        emit!(Filled { series: series_key, buyer: ctx.accounts.taker.key(), seller: lp_key, qty, premium, fee });
+        Ok(())
+    }
+
+    /// The vault buys `qty` contracts written by a taker.
+    pub fn vault_buy(ctx: Context<VaultBuy>, qty: u64, premium: u64, quote_expiry: i64) -> Result<()> {
+        require!(qty > 0, HourlyError::BadQty);
+        let now = Clock::get()?.unix_timestamp;
+        require!(now <= quote_expiry, HourlyError::StaleQuote);
+        let s = &ctx.accounts.series;
+        let v = &ctx.accounts.lp_vault;
+        require!(now >= v.deposit_end, HourlyError::VaultNotTrading);
+        require!(!s.settled && now < s.expiry, HourlyError::Expired);
+        require!(s.expiry <= v.epoch_end, HourlyError::SeriesOutsideEpoch);
+        require_keys_neq!(ctx.accounts.taker.key(), ctx.accounts.lp_vault.key(), HourlyError::SelfTrade);
+        let per = collateral_per_contract(s)?;
+        let collateral = per.checked_mul(qty).ok_or(HourlyError::Overflow)?;
+        let new_long = ctx.accounts.vault_series.long.checked_add(qty).ok_or(HourlyError::Overflow)?;
+        require!(
+            (new_long as u128) * (per as u128) <= (v.deposits as u128) * (v.max_series_bps as u128) / 10_000,
+            HourlyError::VaultLimit
+        );
+        // taker's collateral -> series escrow
+        token::transfer(
+            CpiContext::new(
+                ctx.accounts.token_program.key(),
+                Transfer {
+                    from: ctx.accounts.taker_quote.to_account_info(),
+                    to: ctx.accounts.vault.to_account_info(),
+                    authority: ctx.accounts.taker.to_account_info(),
+                },
+            ),
+            collateral,
+        )?;
+        let epoch = v.epoch.to_le_bytes();
+        let vbump = [v.bump];
+        let vault_signer: &[&[&[u8]]] = &[&[LPV_SEED, v.config.as_ref(), &epoch, &vbump]];
+        // premium and fee from vault cash
+        if premium > 0 {
+            token::transfer(
+                CpiContext::new_with_signer(
+                    ctx.accounts.token_program.key(),
+                    Transfer {
+                        from: ctx.accounts.cash.to_account_info(),
+                        to: ctx.accounts.taker_quote.to_account_info(),
+                        authority: ctx.accounts.lp_vault.to_account_info(),
+                    },
+                    vault_signer,
+                ),
+                premium,
+            )?;
+        }
+        let fee = fee_for(premium, ctx.accounts.config.fee_bps);
+        if fee > 0 {
+            token::transfer(
+                CpiContext::new_with_signer(
+                    ctx.accounts.token_program.key(),
+                    Transfer {
+                        from: ctx.accounts.cash.to_account_info(),
+                        to: ctx.accounts.treasury.to_account_info(),
+                        authority: ctx.accounts.lp_vault.to_account_info(),
+                    },
+                    vault_signer,
+                ),
+                fee,
+            )?;
+        }
+        let seeds = series_seeds(s);
+        let sbump = [s.bump];
+        let series_signer: &[&[&[u8]]] = &[&[
+            SERIES_SEED, seeds.0.as_ref(), &s.underlying, &seeds.1, &seeds.2, &seeds.3, &seeds.4, &seeds.5, &sbump,
+        ]];
+        token::mint_to(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_program.key(),
+                MintTo {
+                    mint: ctx.accounts.long_mint.to_account_info(),
+                    to: ctx.accounts.vault_long.to_account_info(),
+                    authority: ctx.accounts.series.to_account_info(),
+                },
+                series_signer,
+            ),
+            qty,
+        )?;
+        let lp_key = ctx.accounts.lp_vault.key();
+        let series_key = ctx.accounts.series.key();
+        let taker_key = ctx.accounts.taker.key();
+        let p = &mut ctx.accounts.position;
+        if p.writer == Pubkey::default() {
+            p.writer = taker_key;
+            p.series = series_key;
+            p.bump = ctx.bumps.position;
+        }
+        p.amount = p.amount.checked_add(qty).ok_or(HourlyError::Overflow)?;
+        let vs = &mut ctx.accounts.vault_series;
+        if vs.vault == Pubkey::default() {
+            vs.vault = lp_key;
+            vs.series = series_key;
+            vs.bump = ctx.bumps.vault_series;
+            ctx.accounts.lp_vault.open_series += 1;
+        }
+        vs.long = new_long;
+        let s = &mut ctx.accounts.series;
+        s.open_interest = s.open_interest.checked_add(qty).ok_or(HourlyError::Overflow)?;
+        emit!(Filled { series: series_key, buyer: lp_key, seller: taker_key, qty, premium, fee });
+        Ok(())
+    }
+
+    /// After settlement, pulls everything the vault is owed on one series back
+    /// into vault cash. Anyone can call it.
+    pub fn vault_collect(ctx: Context<VaultCollect>) -> Result<()> {
+        let s = &ctx.accounts.series;
+        require!(s.settled, HourlyError::NotSettled);
+        let per_payoff = s.payoff_per_contract;
+        let per_coll = collateral_per_contract(s)?;
+        let vs_long = ctx.accounts.vault_series.long;
+        let vs_short = ctx.accounts.vault_series.short;
+        let v = &ctx.accounts.lp_vault;
+        let epoch = v.epoch.to_le_bytes();
+        let vbump = [v.bump];
+        let vault_signer: &[&[&[u8]]] = &[&[LPV_SEED, v.config.as_ref(), &epoch, &vbump]];
+        let mut owed: u64 = 0;
+        if vs_long > 0 {
+            let vl = ctx.accounts.vault_long.as_ref().ok_or(HourlyError::BadQty)?;
+            token::burn(
+                CpiContext::new_with_signer(
+                    ctx.accounts.token_program.key(),
+                    Burn {
+                        mint: ctx.accounts.long_mint.to_account_info(),
+                        from: vl.to_account_info(),
+                        authority: ctx.accounts.lp_vault.to_account_info(),
+                    },
+                    vault_signer,
+                ),
+                vs_long,
+            )?;
+            owed = owed.checked_add(per_payoff.checked_mul(vs_long).ok_or(HourlyError::Overflow)?).ok_or(HourlyError::Overflow)?;
+        }
+        if vs_short > 0 {
+            let pos = ctx.accounts.position.as_mut().ok_or(HourlyError::BadQty)?;
+            require_keys_eq!(pos.writer, ctx.accounts.lp_vault.key(), HourlyError::Unauthorized);
+            let back = (per_coll - per_payoff).checked_mul(pos.amount).ok_or(HourlyError::Overflow)?;
+            owed = owed.checked_add(back).ok_or(HourlyError::Overflow)?;
+            pos.amount = 0;
+        }
+        if owed > 0 {
+            pay_from_vault(s, &ctx.accounts.series.to_account_info(), &ctx.accounts.vault, &ctx.accounts.cash, &ctx.accounts.token_program, owed)?;
+        }
+        let vs = &mut ctx.accounts.vault_series;
+        vs.long = 0;
+        vs.short = 0;
+        if !vs.closed {
+            vs.closed = true;
+            let v = &mut ctx.accounts.lp_vault;
+            v.open_series = v.open_series.saturating_sub(1);
+        }
+        Ok(())
+    }
+
+    /// After the epoch ends and every series is collected, LPs burn shares for
+    /// their pro rata slice of vault cash.
+    pub fn vault_withdraw(ctx: Context<VaultWithdraw>, shares: u64) -> Result<()> {
+        require!(shares > 0, HourlyError::BadQty);
+        let now = Clock::get()?.unix_timestamp;
+        let v = &ctx.accounts.lp_vault;
+        require!(now >= v.epoch_end && v.open_series == 0, HourlyError::VaultLocked);
+        let supply = ctx.accounts.share_mint.supply;
+        require!(supply > 0 && shares <= supply, HourlyError::BadQty);
+        let amount = ((ctx.accounts.cash.amount as u128) * (shares as u128) / (supply as u128)) as u64;
+        token::burn(
+            CpiContext::new(
+                ctx.accounts.token_program.key(),
+                Burn {
+                    mint: ctx.accounts.share_mint.to_account_info(),
+                    from: ctx.accounts.owner_shares.to_account_info(),
+                    authority: ctx.accounts.owner.to_account_info(),
+                },
+            ),
+            shares,
+        )?;
+        let epoch = v.epoch.to_le_bytes();
+        let vbump = [v.bump];
+        let vault_signer: &[&[&[u8]]] = &[&[LPV_SEED, v.config.as_ref(), &epoch, &vbump]];
+        if amount > 0 {
+            token::transfer(
+                CpiContext::new_with_signer(
+                    ctx.accounts.token_program.key(),
+                    Transfer {
+                        from: ctx.accounts.cash.to_account_info(),
+                        to: ctx.accounts.owner_quote.to_account_info(),
+                        authority: ctx.accounts.lp_vault.to_account_info(),
+                    },
+                    vault_signer,
+                ),
+                amount,
+            )?;
+        }
+        Ok(())
+    }
 }
 
 // ---------- pure math ----------
@@ -372,6 +774,11 @@ pub fn sb_value_to_atoms(v: i128) -> Result<u64> {
     let atoms = (v + SB_TO_ATOMS / 2) / SB_TO_ATOMS;
     require!(atoms > 0 && atoms <= u64::MAX as i128, HourlyError::OracleBadValue);
     Ok(atoms as u64)
+}
+
+/// Fee in quote atoms, rounded down.
+pub fn fee_for(premium: u64, fee_bps: u16) -> u64 {
+    ((premium as u128 * fee_bps as u128) / 10_000) as u64
 }
 
 pub fn collateral_per_contract(s: &Series) -> Result<u64> {
@@ -449,6 +856,8 @@ pub struct Config {
     pub settler: Pubkey,
     pub quote_mint: Pubkey,
     pub oracle_queue: Pubkey,
+    pub treasury: Pubkey,
+    pub fee_bps: u16,
     pub bump: u8,
 }
 
@@ -484,6 +893,34 @@ pub struct Position {
     pub bump: u8,
 }
 
+#[account]
+#[derive(InitSpace)]
+pub struct LpVault {
+    pub config: Pubkey,
+    pub epoch: u32,
+    pub quoter: Pubkey,
+    pub share_mint: Pubkey,
+    pub cash: Pubkey,
+    pub deposit_end: i64,
+    pub epoch_end: i64,
+    pub deposits: u64,
+    pub max_series_bps: u16,
+    pub open_series: u32,
+    pub premiums: u64,
+    pub bump: u8,
+}
+
+#[account]
+#[derive(InitSpace)]
+pub struct VaultSeries {
+    pub vault: Pubkey,
+    pub series: Pubkey,
+    pub short: u64,
+    pub long: u64,
+    pub closed: bool,
+    pub bump: u8,
+}
+
 #[event]
 pub struct Filled {
     pub series: Pubkey,
@@ -491,6 +928,7 @@ pub struct Filled {
     pub seller: Pubkey,
     pub qty: u64,
     pub premium: u64,
+    pub fee: u64,
 }
 
 #[event]
@@ -533,6 +971,16 @@ pub enum HourlyError {
     OracleBadValue,
     #[msg("fallback settlement is not open yet")]
     FallbackTooEarly,
+    #[msg("vault deposits are closed")]
+    VaultClosed,
+    #[msg("vault is locked until its epoch ends and every series is collected")]
+    VaultLocked,
+    #[msg("trade exceeds the vault's exposure cap for this series")]
+    VaultLimit,
+    #[msg("vault is not trading yet")]
+    VaultNotTrading,
+    #[msg("series expires after the vault's epoch")]
+    SeriesOutsideEpoch,
 }
 
 // ---------- accounts ----------
@@ -544,6 +992,8 @@ pub struct InitConfig<'info> {
     #[account(init, payer = admin, space = 8 + Config::INIT_SPACE, seeds = [CONFIG_SEED], bump)]
     pub config: Account<'info, Config>,
     pub quote_mint: Box<Account<'info, Mint>>,
+    #[account(token::mint = quote_mint)]
+    pub treasury: Box<Account<'info, TokenAccount>>,
     pub system_program: Program<'info, System>,
 }
 
@@ -623,6 +1073,8 @@ pub struct Fill<'info> {
     pub seller_quote: Box<Account<'info, TokenAccount>>,
     #[account(mut, token::mint = long_mint, token::authority = buyer)]
     pub buyer_long: Box<Account<'info, TokenAccount>>,
+    #[account(mut, address = config.treasury @ HourlyError::Unauthorized)]
+    pub treasury: Box<Account<'info, TokenAccount>>,
     #[account(
         init_if_needed,
         payer = payer,
@@ -716,6 +1168,153 @@ pub struct Reclaim<'info> {
     pub token_program: Program<'info, Token>,
 }
 
+
+#[derive(Accounts)]
+#[instruction(epoch: u32)]
+pub struct CreateVault<'info> {
+    #[account(mut)]
+    pub admin: Signer<'info>,
+    #[account(seeds = [CONFIG_SEED], bump = config.bump, has_one = admin @ HourlyError::Unauthorized, has_one = quote_mint)]
+    pub config: Box<Account<'info, Config>>,
+    pub quote_mint: Box<Account<'info, Mint>>,
+    #[account(init, payer = admin, space = 8 + LpVault::INIT_SPACE, seeds = [LPV_SEED, config.key().as_ref(), &epoch.to_le_bytes()], bump)]
+    pub lp_vault: Box<Account<'info, LpVault>>,
+    #[account(init, payer = admin, seeds = [LPV_SHARES_SEED, lp_vault.key().as_ref()], bump, mint::decimals = 6, mint::authority = lp_vault)]
+    pub share_mint: Box<Account<'info, Mint>>,
+    #[account(init, payer = admin, seeds = [LPV_CASH_SEED, lp_vault.key().as_ref()], bump, token::mint = quote_mint, token::authority = lp_vault)]
+    pub cash: Box<Account<'info, TokenAccount>>,
+    pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct VaultDeposit<'info> {
+    pub depositor: Signer<'info>,
+    #[account(seeds = [CONFIG_SEED], bump = config.bump)]
+    pub config: Box<Account<'info, Config>>,
+    #[account(mut, has_one = config, has_one = share_mint, has_one = cash)]
+    pub lp_vault: Box<Account<'info, LpVault>>,
+    #[account(mut)]
+    pub share_mint: Box<Account<'info, Mint>>,
+    #[account(mut)]
+    pub cash: Box<Account<'info, TokenAccount>>,
+    #[account(mut, token::mint = config.quote_mint, token::authority = depositor)]
+    pub depositor_quote: Box<Account<'info, TokenAccount>>,
+    #[account(mut, token::mint = share_mint, token::authority = depositor)]
+    pub depositor_shares: Box<Account<'info, TokenAccount>>,
+    pub token_program: Program<'info, Token>,
+}
+
+#[derive(Accounts)]
+pub struct VaultSell<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    pub quoter: Signer<'info>,
+    pub taker: Signer<'info>,
+    #[account(seeds = [CONFIG_SEED], bump = config.bump)]
+    pub config: Box<Account<'info, Config>>,
+    #[account(mut, has_one = config, has_one = quoter @ HourlyError::Unauthorized, has_one = cash)]
+    pub lp_vault: Box<Account<'info, LpVault>>,
+    #[account(mut)]
+    pub cash: Box<Account<'info, TokenAccount>>,
+    #[account(mut, address = config.treasury @ HourlyError::Unauthorized)]
+    pub treasury: Box<Account<'info, TokenAccount>>,
+    #[account(mut, has_one = config, has_one = long_mint, has_one = vault)]
+    pub series: Box<Account<'info, Series>>,
+    #[account(mut)]
+    pub long_mint: Box<Account<'info, Mint>>,
+    #[account(mut)]
+    pub vault: Box<Account<'info, TokenAccount>>,
+    #[account(mut, token::mint = config.quote_mint, token::authority = taker)]
+    pub taker_quote: Box<Account<'info, TokenAccount>>,
+    #[account(mut, token::mint = long_mint, token::authority = taker)]
+    pub taker_long: Box<Account<'info, TokenAccount>>,
+    #[account(init_if_needed, payer = payer, space = 8 + Position::INIT_SPACE,
+        seeds = [POSITION_SEED, series.key().as_ref(), lp_vault.key().as_ref()], bump)]
+    pub position: Box<Account<'info, Position>>,
+    #[account(init_if_needed, payer = payer, space = 8 + VaultSeries::INIT_SPACE,
+        seeds = [LPV_SERIES_SEED, lp_vault.key().as_ref(), series.key().as_ref()], bump)]
+    pub vault_series: Box<Account<'info, VaultSeries>>,
+    pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct VaultBuy<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    pub quoter: Signer<'info>,
+    pub taker: Signer<'info>,
+    #[account(seeds = [CONFIG_SEED], bump = config.bump)]
+    pub config: Box<Account<'info, Config>>,
+    #[account(mut, has_one = config, has_one = quoter @ HourlyError::Unauthorized, has_one = cash)]
+    pub lp_vault: Box<Account<'info, LpVault>>,
+    #[account(mut)]
+    pub cash: Box<Account<'info, TokenAccount>>,
+    #[account(mut, address = config.treasury @ HourlyError::Unauthorized)]
+    pub treasury: Box<Account<'info, TokenAccount>>,
+    #[account(mut, has_one = config, has_one = long_mint, has_one = vault)]
+    pub series: Box<Account<'info, Series>>,
+    #[account(mut)]
+    pub long_mint: Box<Account<'info, Mint>>,
+    #[account(mut)]
+    pub vault: Box<Account<'info, TokenAccount>>,
+    #[account(mut, token::mint = config.quote_mint, token::authority = taker)]
+    pub taker_quote: Box<Account<'info, TokenAccount>>,
+    #[account(init_if_needed, payer = payer, seeds = [LPV_LONG_SEED, lp_vault.key().as_ref(), series.key().as_ref()], bump,
+        token::mint = long_mint, token::authority = lp_vault)]
+    pub vault_long: Box<Account<'info, TokenAccount>>,
+    #[account(init_if_needed, payer = payer, space = 8 + Position::INIT_SPACE,
+        seeds = [POSITION_SEED, series.key().as_ref(), taker.key().as_ref()], bump)]
+    pub position: Box<Account<'info, Position>>,
+    #[account(init_if_needed, payer = payer, space = 8 + VaultSeries::INIT_SPACE,
+        seeds = [LPV_SERIES_SEED, lp_vault.key().as_ref(), series.key().as_ref()], bump)]
+    pub vault_series: Box<Account<'info, VaultSeries>>,
+    pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct VaultCollect<'info> {
+    #[account(seeds = [CONFIG_SEED], bump = config.bump)]
+    pub config: Box<Account<'info, Config>>,
+    #[account(mut, has_one = config, has_one = cash)]
+    pub lp_vault: Box<Account<'info, LpVault>>,
+    #[account(mut)]
+    pub cash: Box<Account<'info, TokenAccount>>,
+    #[account(has_one = config, has_one = long_mint, has_one = vault)]
+    pub series: Box<Account<'info, Series>>,
+    #[account(mut)]
+    pub long_mint: Box<Account<'info, Mint>>,
+    #[account(mut)]
+    pub vault: Box<Account<'info, TokenAccount>>,
+    #[account(mut, seeds = [LPV_SERIES_SEED, lp_vault.key().as_ref(), series.key().as_ref()], bump = vault_series.bump)]
+    pub vault_series: Box<Account<'info, VaultSeries>>,
+    #[account(mut, seeds = [LPV_LONG_SEED, lp_vault.key().as_ref(), series.key().as_ref()], bump)]
+    pub vault_long: Option<Box<Account<'info, TokenAccount>>>,
+    #[account(mut, seeds = [POSITION_SEED, series.key().as_ref(), lp_vault.key().as_ref()], bump = position.bump)]
+    pub position: Option<Box<Account<'info, Position>>>,
+    pub token_program: Program<'info, Token>,
+}
+
+#[derive(Accounts)]
+pub struct VaultWithdraw<'info> {
+    pub owner: Signer<'info>,
+    #[account(seeds = [CONFIG_SEED], bump = config.bump)]
+    pub config: Box<Account<'info, Config>>,
+    #[account(mut, has_one = config, has_one = share_mint, has_one = cash)]
+    pub lp_vault: Box<Account<'info, LpVault>>,
+    #[account(mut)]
+    pub share_mint: Box<Account<'info, Mint>>,
+    #[account(mut)]
+    pub cash: Box<Account<'info, TokenAccount>>,
+    #[account(mut, token::mint = share_mint, token::authority = owner)]
+    pub owner_shares: Box<Account<'info, TokenAccount>>,
+    #[account(mut, token::mint = config.quote_mint)]
+    pub owner_quote: Box<Account<'info, TokenAccount>>,
+    pub token_program: Program<'info, Token>,
+}
+
 #[cfg(test)]
 mod math_tests {
     use super::*;
@@ -732,6 +1331,14 @@ mod math_tests {
         assert_eq!(payoff_per_contract(KIND_DIGITAL, 2_500_000, 1_000_000, 1, 2_500_000).unwrap(), 0);
         assert_eq!(payoff_per_contract(KIND_DIGITAL, 2_500_000, 1_000_000, 1, 2_500_001).unwrap(), 1_000_000);
         assert!(payoff_per_contract(9, 1, 1, 1, 1).is_err());
+    }
+
+    #[test]
+    fn fee_math() {
+        assert_eq!(fee_for(600_000, 100), 6_000); // 1% of $0.60
+        assert_eq!(fee_for(99, 100), 0); // rounds down
+        assert_eq!(fee_for(1_000_000, 0), 0);
+        assert_eq!(fee_for(u64::MAX, 500), ((u64::MAX as u128) * 500 / 10_000) as u64);
     }
 
     #[test]
