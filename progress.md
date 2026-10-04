@@ -59,3 +59,11 @@ Deadline: submissions due 2026-10-12 (verified colosseum.com/worldsfair).
 - devnet-pow: compiles only with libssl-dev (no sudo) AND needs >= 5000 lamports to start. Dead end without Mehdi's SOL.
 - Running in background: launch video (ship-video fork), research agents -> research/market-structure.md, research/investors-and-colosseum.md
 - NEXT (batched program change after research): protocol fee to treasury, liquidity design (LP vault or resting offers), then fresh preview chain.
+
+## Checkpoint 2026-10-04 ~17:50 UTC
+- Program v2: 1% protocol fee to treasury (cap 5%), weekly underwriting vaults (deposit, vault_sell/vault_buy under 20% per-series cap, collect, pro-rata withdraw). 9 tests pass. opt-level s -> 572 KB.
+- Devnet SOL need raised to ~10 (deploy peak ~8). Still 0.
+- Preview chain reset onto v2: vaults epoch 1 (trades Oct 5 to 11) + epoch 2, venue seed $25k each.
+- Vault routing verified on scratch chain via app code: desk during deposits, vault after, cap overflow -> desk, settle+collect, LP withdraw exact (507.58 on 500).
+- Video: ~/scratchpad/hourly-video/out.mp4 (32 s, 1080p), stray "A" and invented $2.55 fixed.
+- Research: research/investors-and-colosseum.md done (pitch = compute as commodity, not AI traders). market-structure.md still running.
