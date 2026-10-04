@@ -2,7 +2,7 @@
 
 Options on the rental price of AI chips, settled on Solana by oracle.
 
-An hour of an Nvidia H100 rented for $2.64 on October 3, 2026, according to Ornn's Compute Price Index of transacted rental prices. Over the previous three months the same index moved H200 from $4.02 to $6.05 and B200 from $5.14 to $7.81. GPU owners lose when that price falls. AI companies that rent compute lose when it rises. CME scheduled its first rental-index futures on H100 and B200 for October 5, 2026, monthly and cash settled, pending regulatory review. None of the announced venues (CME, ICE with Ornn, Architect) offers options on the price, and our search found no on-chain market for it.
+An hour of an Nvidia H100 rented for $2.64 on October 3, 2026, according to Ornn's Compute Price Index of transacted rental prices. Over the previous three months the same index moved H200 from $4.02 to $6.05 and B200 from $5.14 to $7.81. GPU owners lose when that price falls. AI companies that rent compute lose when it rises. CME scheduled its first rental-index futures on H100 and B200 for October 5, 2026, monthly and cash settled, pending regulatory review. Kalshi and Polymarket already list yes/no contracts settled on Ornn's index. None of the announced venues (CME, ICE with Ornn, Architect, Kalshi, Polymarket) offers capped floors, caps or collars on the price, or lets anyone underwrite them.
 
 Hourly is that market:
 
@@ -98,7 +98,7 @@ Not yet checked: a full `settle_oracle` transaction on devnet, which needs the d
 ## Known limits
 
 - The backup settler is a trusted key. It can act only if the oracle is silent for 72 hours after expiry.
-- Settlement reads a single data source, Ornn's public index-history endpoint, which is not a documented API. Ornn's licence for using the index as a settlement reference has not been confirmed.
+- Settlement reads a single data source, Ornn's documented public endpoint (api.ornnai.com). Ornn's public Terms bar using its data for settlement or derivatives without a signed agreement, so a licence from Ornn is required before any real-money launch.
 - Devnet settlement asks for one oracle signature. Production should require several.
 - Listing is admin-only. Trading is permissionless.
 - The model has 92 days of history to learn from. Its calibration is measured live and shown in the app.

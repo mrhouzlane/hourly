@@ -2,7 +2,9 @@
 
 Run date: 2026-10-04. Every factual claim is tagged VERIFIED (URL, date seen) or UNVERIFIED (what blocked it). Nothing here is filled from memory.
 
-Status: IN PROGRESS (checkpointed after each section).
+Status: COMPLETE (sections A to D plus implications, written 2026-10-04 ~17:50 UTC).
+
+Blocked or unreachable this run: getdeploying.com (Cloudflare 403), cmegroup.com (403/timeout; PR Newswire copy used), DFlow prediction-market API (403 without key; docs 404), DefiLlama RWA page and DCD, CNBC, Morningstar and The Next Web articles (403), X/Twitter posts (not fetched in this run, so X-only claims stay UNVERIFIED), inferra.trade and itomarkets.com (JS-rendered, title only), app.drift.trade/bet (JS shell).
 
 ## A. Underlyings that could be listed
 
@@ -41,7 +43,7 @@ Discrepancies to know about (VERIFIED, 2026-10-04): the docs say the free tier c
 - Premium Data Use Addendum: Premium users may not "create ... any index, benchmark, reference rate, price assessment, oracle, net asset value, or settlement product that uses Company Data as an input" or "use Company Data in listed derivatives, structured products, tokens, or similar instruments without a separate written index or redistribution license". Its public-prints carve-out lets "headline values ... be used, displayed, and referenced subject to attribution", but it does not mention settlement.
 - The project's progress.md says the addendum is "behind paywall". It is not: the page is public.
 
-**Licensees visible today (VERIFIED, 2026-10-04):** ICE (notice below), Kalshi and Polymarket both settle live markets on Ornn (Section D). Whether they hold written licences is UNVERIFIED (no public licence text found).
+**Venues using OCPI today (VERIFIED, 2026-10-04):** ICE (planned futures, notice below), Architect AX (live `OCPI-H100` perp), and Kalshi and Polymarket (live markets settled on Ornn); see Section D. Whether they hold written licences is UNVERIFIED (no public licence text found).
 
 ### A2. Other compute price sources
 
@@ -101,7 +103,7 @@ Discrepancies to know about (VERIFIED, 2026-10-04): the docs say the free tier c
 - **Polymarket GPU markets, measured:** 40 GPU-rental events, 38 settled on Ornn and 2 on Silicon Data. Lifetime volume is about $2.58M ($1.68M on the Ornn events). 16 events are open now, with $490k volume, $89k liquidity and $51.8k open interest. Summing `rewardsDailyRate` over their markets gives about $1,046 per day of LP rewards (unit assumed USDC/day). On the H100 end-of-October event, the $2.50 to $2.75 bracket quoted 0.24/0.25 while the tails were 0.005/0.076 (VERIFIED, gamma-api.polymarket.com, 2026-10-04).
 - **Kalshi Liquidity Incentive Program:** Kalshi snapshots the book once per second. Orders count only if both sides reach a Target Size (100 to 20,000 contracts), and the program ends January 1, 2027. Non-U.S. users are ineligible for rewards (VERIFIED, https://help.kalshi.com/en/articles/13823851-liquidity-incentive-program, 2026-10-04).
 - **Kalshi Liquidity Provider Program:** members under a Market Maker Agreement can become Designated Liquidity Providers for "Incentivized Series", chosen by an "auction" on the minimum reward they will accept. No GPU series appears on the current list. AI-adjacent "AI Share" series do (VERIFIED, https://help.kalshi.com/en/articles/15410219-liquidity-provider-program, 2026-10-04).
-- **Kalshi GPU markets, measured:** across 19 Ornn-settled series (H100/H200/B200 weekly, monthly, monthly-average, quarterly, yearly, daily-print), about 3.25M contracts have traded since May to June 2026, with about 192k contracts of open interest on active markets ($1 notional each; contracts, not dollars). The busiest are the monthly-average series KXH200MS (596k), KXH100MS (361k) and KXB200MS (358k), and the daily-print series KXH200WS (557k), KXB200WS (431k) and KXH100WS (416k) (VERIFIED, `volume_fp`/`open_interest_fp` summed from https://api.elections.kalshi.com/trade-api/v2/events?series_ticker=..., 2026-10-04).
+- **Kalshi GPU markets, measured:** across 19 Ornn-settled series (H100/H200/B200 weekly, monthly, monthly-average, quarterly, yearly, daily-print), at least 3.25M contracts have traded on the markets the API still returns, with about 192k contracts of open interest on active markets ($1 notional each; contracts, not dollars). This is a lower bound: older events such as KXH100MON-26MAR31 ("Price of NVIDIA H100 compute on Mar 31, 2026?") exist but no longer return nested markets. Fortune reports "$4.4M in notional volume through July 27 against $285K on Polymarket" for these chip markets (VERIFIED, https://fortune.com/2026/08/12/kalshi-compute-futures-cme-intercontinental/, via WebFetch). The busiest are the monthly-average series KXH200MS (596k), KXH100MS (361k) and KXB200MS (358k), and the daily-print series KXH200WS (557k), KXB200WS (431k) and KXH100WS (416k) (VERIFIED, `volume_fp`/`open_interest_fp` summed from https://api.elections.kalshi.com/trade-api/v2/events?series_ticker=..., 2026-10-04).
 
 **Named firms (prediction markets and on-chain options)**
 - Susquehanna International Group: Kalshi market maker "providing pricing and liquidity" (VERIFIED, CoinDesk, Aug 19 2026, https://www.coindesk.com/markets/2026/08/19/cantor-opens-kalshi-prediction-markets-to-thousands-of-institutional-clients). The same article says Cantor Fitzgerald brokers Kalshi block trades for about 3,000 institutional clients.
@@ -132,8 +134,48 @@ Discrepancies to know about (VERIFIED, 2026-10-04): the docs say the free tier c
 
 ## D. Competitors and adjacent projects
 
-(pending)
+**Flag: this contradicts a project-file claim.** The README says "our search found no on-chain market for it". Polymarket, which is on-chain (Polygon, pUSD collateral), has run Ornn-settled GPU price markets since May 2026 and has 16 live today. Kalshi lists the same daily-print digital that Hourly demos, and Kalshi markets have been tokenized on Solana since Dec 2025, though whether the GPU series are among them is UNVERIFIED. The README line needs rewording before submission.
+
+### D1. Same underlying, overlapping product
+- **Kalshi (CFTC DCM), Ornn-settled (VERIFIED, Kalshi API and market rules, 2026-10-04):**
+  - Daily-print digitals, e.g. "NVIDIA H100 · Hourly price on Oct 09 (Week 41)": "If the value of NVIDIA H100 compute per hour is above $X on Oct 09, 2026 at 4 PM ET". Strikes seen from $1.00 to $3.00.
+  - Monthly-average binaries out to August 2027, e.g. "NVIDIA H100 · Average hourly price in August 2027", which resolve on "the arithmetic mean of hourly values reported by Ornn".
+  - Weekly up/down, month-end, quarterly and year-max ladders, on H100, H200 and B200.
+  - Kalshi also publishes GPU forward curves built from these markets (VERIFIED, Finance Magnates via TradingView, CEO Tarek Mansour: "Compute is the new oil").
+  - Hourly's example "Will the H100 print above $2.70 on Fri Oct 9?" is the same contract as KXH100WS-26OCT09.
+- **Polymarket (on-chain), Ornn-settled (VERIFIED, gamma API, 2026-10-04):** month-end bracket markets for H100, H200, B200, A100 and RTX 5090 (October, November, end of 2026), "hit in 2026" ladders and up/down markets. These are binary and negRisk-grouped, with liquidity rewards. Volumes are in C1.
+- Ornn co-founder quote welcoming Kalshi ("You can now trade AI compute prices on a CFTC-regulated exchange"): search snippet only, the DCD page returned 403 (UNVERIFIED). A written Ornn licence for either venue is UNVERIFIED.
+
+### D2. Compute perps and futures (linear exposure, no options)
+- **Architect AX (Bermuda, BMA-regulated, not for U.S. persons):** `OCPI-H100` is "the only currently available compute perpetual", with "roadmap: H200, B200, B300" (VERIFIED, https://architect.co/ax/ and PR Newswire July 21 2026). The page's market snapshot showed "H100 1.65 −2.10%", which does not match OCPI-H100 at 2.64. It may be stale or illustrative (UNVERIFIED which). Architect's U.S. DCM, "American Innovation Exchange", plus Compute Desk's ComputeConnect EFP are pending (C2).
+- **Bitget (CEX):** `H100USDT` and `B200USDT` pre-market compute perps on Silicon Data indices, up to 10x, launched Sep 8 2026 (VERIFIED, Bitget blog). Live stats: H100 last 2.651, 24h volume $283,170, OI 23,160 contracts. B200 last 5.721, 24h volume $3,463, OI 13,130 (VERIFIED, https://api.bitget.com/api/v2/mix/market/ticker and /open-interest, 2026-10-04).
+- **Hyperliquid HIP-3:** `xyz:H100` (trade.xyz) and `para:H100` (Paragon) both exist and are both `isDelisted: true`, with zero OI and zero 24h volume (VERIFIED, `meta`/`metaAndAssetCtxs` on api.hyperliquid.xyz, 2026-10-04). Their oracle source (one snippet says "Squaretower-priced compute index") is UNVERIFIED. `xyz:DRAM` is the Roundhill Memory ETF, not memory prices (VERIFIED, https://docs.trade.xyz/perpetuals/specifications-and-schedules/specification-index.md). `io:DRAM` (EntropyIO) is live with $814k 24h volume; its underlying is UNVERIFIED.
+- **CME** (Silicon Data, Oct 5 2026) and **ICE** (Ornn, pending CFTC comment period): see A2. None of the fetched specs or releases mention options (VERIFIED absence: CME release, ICE notice, ICE May 19 release, AX page, Bitget blog).
+
+### D3. Solana
+- **No Solana-native venue was found listing options or prediction markets on a GPU price index** (absence within this run's searches, not proof).
+- **Kalshi tokenized markets on Solana** (DFlow/Jupiter) are the closest potential overlap. GPU-series availability is UNVERIFIED (the DFlow API needs a key).
+- **Jupiter x Polymarket** on Solana: GPU-market availability is UNVERIFIED.
+- **Inferra** (inferra.trade, "The Exchange for GPU Compute"): only the title is readable (JS-rendered). Snippet claims of a Solana-mainnet compute exchange with perps and futures "in progress" are UNVERIFIED.
+- **Compute Labs:** a Solana GPU-tokenization protocol (The Block headline, 2024). A claim that it offers GPU perps is UNVERIFIED.
+- **HashLock Compute:** a Colosseum Crypto World's Fair 2026 entry offering delivery-versus-payment escrow for GPU compute on Solana. No price index, no derivatives (VERIFIED, https://github.com/Hashlock-Tech/hashlock-compute README via WebFetch). It is a compute-adjacent entry in the same hackathon.
+- Nosana and io.net are Solana compute marketplaces, not price derivatives (UNVERIFIED, snippets only).
+
+### D4. AI-themed markets (adjacent)
+- Hyperliquid HIP-4 has an `aiModelHeadToHead` template, plus live trade.xyz outcomes on Anthropic and OpenAI IPO timing and on Anthropic's first-day market cap (VERIFIED, outcomeMeta, 2026-10-04). No GPU-price outcome is live (VERIFIED absence, 2026-10-04).
+- Hyperliquid HIP-3 has pre-IPO perps `vntl:OPENAI`, `vntl:ANTHROPIC`, `io:OAI` and `io:ANTH` (VERIFIED, meta and OI caps, 2026-10-04).
+- Kalshi has `KXFLOP` (AI training compute, Our World in Data), "AI Share" series (KXANTHSHARE, KXOPENSHARE, ...) and `KXCMECOMPUTE` ("Will the CME offer compute futures before 2027?") (VERIFIED, series API and LP program page).
+- AI markets on Solana venues (World, Jupiter): UNVERIFIED.
 
 ## Implications for Hourly (INFERENCE, not verified fact)
 
-(pending)
+1. **The licence gates mainnet, not the code.** Ornn's public Terms bar "settlement, reference" use without a signed agreement, and every OCPI venue seen (ICE, Kalshi, Polymarket, AX) presumably has one. Ask data@ornn.com for an index or hackathon licence now. Until then, label settlement as a demo on public prints. Update README "Known limits": the terms are public and say written consent is required; the open question is whether Ornn grants it, not what the terms say.
+2. **Drop "no on-chain market" and "first".** Hourly's open lane is option-shaped hedges: capped, linear floors, caps and one-transaction collars sized per GPU-month, fully collateralized on Solana. Kalshi and Polymarket sell binaries; CME, ICE, AX and Bitget sell linear futures and perps. The daily digital duplicates Kalshi's KXH100WS, so lead the pitch with Hedge and keep Predict as the on-ramp.
+3. **Point the Switchboard feed at the documented host.** Use `https://api.ornnai.com/api/gpu/{gpu}/index-history` (OpenAPI `security: []`) instead of the raw Cloud Run URL, and budget for the 60 requests/minute/IP limit.
+4. **Match ICE HPR conventions.** Use the average of the daily prices over the contract month, contract size equal to the hours in the month, and a $0.001/GPU-hour tick, so floors and caps basis-match the ICE futures if they list. Kalshi's monthly average uses hourly values, so document the rounding and timestamp difference.
+5. **Expect no third-party market maker at launch.** GPU markets are thin everywhere: the Polymarket H100 October event has $3.5k of liquidity, and about $1k/day of rewards is spread across all its GPU markets. Two HIP-3 H100 perps were delisted with zero OI. Keep the venue maker plus RFQ, and court natural hedgers first:
+   - GPU-backed lenders (USD.AI at $334M TVL, GAIB) are long GPU cash flows and so natural floor buyers.
+   - Hyperbolic Labs (public ICE/Ornn supporter), Ornn Compute, SF Compute and Compute Desk are design or distribution partners.
+   - FalconX is the one named firm quoting both on-chain options (Derive) and Kalshi.
+6. **Listing governance can borrow HIP-4's pattern at small scale.** Admin-fixed templates (feed hash, window, strike grid) come first; permissionless instantiation with a USDC bond, slashed for malformed or unsettled series, is a roadmap item.
+7. **Access and regulatory exposure need a line in the submission.** Kalshi gates by KYC and excludes non-U.S. users from rewards, AX excludes U.S. persons, and Solana Kalshi access runs through DFlow "Proof" identity. An open Solana venue selling event contracts or swaps on a commodity index invites CFTC questions. Whether geofencing suffices is a legal call that needs counsel (UNVERIFIED).

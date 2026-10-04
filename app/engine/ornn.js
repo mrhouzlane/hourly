@@ -6,7 +6,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 
-const BASE = "https://ornn-backend-api-135941626504.us-central1.run.app/api/gpu";
+const BASE = "https://api.ornnai.com/api/gpu"; // documented public endpoint, no key, 60 req/min
 // On-chain underlying code -> Ornn GPU name
 const GPUS = {
   H100_SXM: { ornn: "H100 SXM", label: "H100" },
