@@ -51,9 +51,19 @@ async function price(s) {
   return p;
 }
 
+// The venue stops quoting at 19:55 UTC on the window's last day: Ornn's
+// 4pm New York print lands at 20:00 or 21:00 UTC, and nobody should be able
+// to trade against the desk once the answer is public.
+const CUTOFF_S = 19 * 3600 + 55 * 60;
+function tradingEnd(s) {
+  const last = s.meta.dates[s.meta.dates.length - 1];
+  return Math.min(Number(s.expiry), Math.floor(Date.parse(`${last}T00:00:00Z`) / 1000) + CUTOFF_S);
+}
+
 function statusOf(s, nowS) {
   if (s.settled) return "settled";
   if (nowS >= Number(s.expiry)) return "settling";
+  if (nowS >= tradingEnd(s)) return "closed";
   return "open";
 }
 
@@ -76,6 +86,7 @@ function view(s, p, nowS) {
     windowEnd: m.dates[m.dates.length - 1],
     windowDays: m.dates.length,
     expiry: Number(s.expiry),
+    tradingEnd: tradingEnd(s),
     status: statusOf(s, nowS),
     openInterest: Number(s.openInterest),
     feedId: m.feedId,
@@ -104,7 +115,7 @@ async function markets() {
   const out = [];
   for (const s of list) {
     let p = null;
-    if (!s.settled && nowS < Number(s.expiry)) {
+    if (!s.settled && nowS < tradingEnd(s)) {
       try { p = await price(s); } catch (_) { p = null; }
     }
     out.push(view(s, p, nowS));
@@ -137,7 +148,7 @@ async function quote({ legs, seriesId, side, qty, owner }) {
     if (!s) throw venue.httpError(404, "unknown market");
     if (seen.has(leg.series)) throw venue.httpError(400, "two legs on the same market");
     seen.add(leg.series);
-    if (s.settled || nowS >= Number(s.expiry) - 60) throw venue.httpError(409, "This market is closed for trading.");
+    if (s.settled || nowS >= tradingEnd(s)) throw venue.httpError(409, "Trading has closed on this market. The print is due.");
     const lim = LIMITS[s.meta.door];
     if (q > lim.maxQty) throw venue.httpError(400, `Maximum ${lim.maxQty} contracts per trade here.`);
     const p = await price(s);

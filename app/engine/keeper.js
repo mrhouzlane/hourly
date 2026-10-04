@@ -130,6 +130,13 @@ async function settleDue() {
     if (s.settled || nowS < Number(s.expiry)) continue;
     const id = s.pubkey.toBase58();
     let sig = null, how = null;
+    if (venue.CLUSTER !== "devnet") {
+      // preview chain: no Switchboard there; the preview build lets the backup key settle at expiry
+      try { sig = await settleFallback(s); how = "preview"; }
+      catch (e) { log("preview settle failed", id, String(e.message || e).slice(0, 200)); }
+      if (sig) { venue.state.settlements.push({ series: id, tx: sig, how, at: new Date().toISOString() }); venue.save(); log("settled", id, how, sig); }
+      continue;
+    }
     for (let i = 0; i < 3 && !sig; i++) {
       try { sig = await settleOracle(s); how = "oracle"; }
       catch (e) { log("oracle settle attempt failed", id, String(e.message || e).slice(0, 200)); await sleep(3000 * (i + 1)); }

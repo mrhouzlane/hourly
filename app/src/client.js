@@ -304,7 +304,7 @@ function renderPredict() {
     const noPrice = Math.max(0.01, 1 - f.model.bid);
     html += `<div class="feature">
       <div class="feature-text">
-        <div class="label muted">Closes in ${countdown(f.expiry)}</div>
+        <div class="label muted">Trading closes in ${countdown(f.tradingEnd)}</div>
         <h3>${esc(question(f))}</h3>
         <div class="feature-num">${pct(f.model.probItm)}<small>chance, by the venue's model</small></div>
         <div class="feature-yn">
@@ -324,7 +324,7 @@ function renderPredict() {
     return `<div class="ladder-group">
       <div class="ladder-head"><span>${esc(label)}</span><span class="muted">${lp ? `last $${lp.toFixed(2)}` : ""}</span></div>
       ${ms.sort((a, b) => a.expiry - b.expiry || a.strike - b.strike).map((m) => {
-        if (!m.model) return `<div class="lrow"><div class="lq">${dayLabel(m.windowEnd)}<span class="muted">above $${m.strike.toFixed(2)}</span></div><div class="lsettle muted">Settling</div></div>`;
+        if (!m.model) return `<div class="lrow"><div class="lq">${dayLabel(m.windowEnd)}<span class="muted">above $${m.strike.toFixed(2)}</span></div><div class="lsettle muted">${m.status === "closed" ? "Closed, print due" : "Settling"}</div></div>`;
         const noPrice = Math.max(0.01, 1 - m.model.bid);
         return `<div class="lrow">
           <div class="lq">${dayLabel(m.windowEnd)}<span class="muted">above $${m.strike.toFixed(2)}</span></div>
@@ -604,7 +604,7 @@ async function refreshPortfolio() {
       const mark = r.markPerContract ?? 0;
       value = r.long ? usd(mark * r.long) : `${usd(-mark * r.short)}<div class="m">${usd(r.lockedCollateral, 0)} locked</div>`;
     }
-    const when = r.status === "settled" ? "Settled" : r.status === "settling" ? "Settling now" : `Closes in ${countdown(r.expiry)}`;
+    const when = r.status === "settled" ? "Settled" : r.status === "settling" ? "Settling now" : r.status === "closed" ? "Closed, print due" : `Trading closes in ${countdown(r.tradingEnd)}`;
     return `<div class="pf-row"><div><div class="t">${esc(positionTitle(r))}</div><div class="m">${when}</div></div><div>${pos}</div><div class="v">${value}</div><div class="act">${act}</div></div>`;
   }).join("");
   body.innerHTML = `
@@ -653,7 +653,7 @@ function renderSettlement() {
   const fills = (st.fills || []).slice(0, 8);
   const titleOf = (id, fallback) => { const m = S.markets.find((x) => x.id === id); return m ? (m.door === "predict" ? question(m) : positionTitle(m)) : fallback; };
   $("#ledger").innerHTML = `
-    <div><h3>Recent settlements</h3><ul>${settled.length ? settled.map((m) => `<li><span>${esc(titleOf(m.id, m.title))}</span><span>${(() => { const u = st.settlements.find((s) => s.series === m.id)?.url; return u ? `<a href="${esc(u)}" target="_blank" rel="noopener">$${m.settled.price.toFixed(4)}</a>` : `$${m.settled.price.toFixed(4)}`; })()} ${m.settled.byOracle ? "oracle" : "backup"}</span></li>`).join("") : `<li><span>${st.cluster === "devnet" ? "The first markets settle after the next 4pm New York print." : "Oracle settlement runs on devnet. This preview chain trades but does not settle."}</span></li>`}</ul></div>
+    <div><h3>Recent settlements</h3><ul>${settled.length ? settled.map((m) => `<li><span>${esc(titleOf(m.id, m.title))}</span><span>${(() => { const u = st.settlements.find((s) => s.series === m.id)?.url; return u ? `<a href="${esc(u)}" target="_blank" rel="noopener">$${m.settled.price.toFixed(4)}</a>` : `$${m.settled.price.toFixed(4)}`; })()} ${m.settled.byOracle ? "oracle" : st.cluster === "devnet" ? "backup" : "preview"}</span></li>`).join("") : `<li><span>${st.cluster === "devnet" ? "The first markets settle after the next 4pm New York print." : "Oracle settlement runs on devnet. This preview chain trades but does not settle."}</span></li>`}</ul></div>
     <div><h3>Recent trades</h3><ul>${fills.length ? fills.map((f) => `<li><span>${esc(titleOf(f.series, f.title))}</span><span>${(() => { const t = `${f.side === "buy" ? "Bought" : "Sold"} ${f.qty} at ${f.price < 1 ? cents(f.price) : usd(f.price)}`; return f.url ? `<a href="${esc(f.url)}" target="_blank" rel="noopener">${t}</a>` : t; })()}</span></li>`).join("") : "<li><span>No trades yet.</span></li>"}</ul></div>`;
   $("#footer-line").textContent = st.cluster === "devnet"
     ? "Solana devnet. Test USDC has no value. Not an offer or investment advice. Index data from Ornn, oracle by Switchboard."

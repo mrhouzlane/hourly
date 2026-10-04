@@ -18,6 +18,8 @@ idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
 anchor-debug = []
 custom-heap = []
 custom-panic = []
+# demo chain only: backup settlement allowed at expiry (no oracle there)
+preview = []
 
 
 [dependencies]

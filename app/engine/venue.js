@@ -15,7 +15,7 @@ const ROOT = path.join(__dirname, "..");
 const CLUSTER = process.env.CLUSTER || "devnet";
 const RPC_URL = process.env.RPC_URL || (CLUSTER === "devnet" ? "https://api.devnet.solana.com" : "http://127.0.0.1:8899");
 const KEYS_DIR = process.env.KEYS_DIR || path.join(ROOT, "..", "keys");
-const STATE_FILE = path.join(ROOT, "state", `${CLUSTER}.json`);
+const STATE_FILE = process.env.STATE_FILE || path.join(ROOT, "state", `${CLUSTER}.json`);
 const ORACLE_QUEUE = new PublicKey(process.env.ORACLE_QUEUE || "EYiAmGSdsQTuCw413V5BzaruWuCCSDgTPtBGvLkXHbe7");
 
 const conn = new Connection(RPC_URL, "confirmed");

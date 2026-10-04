@@ -43,8 +43,12 @@ pub const KIND_DIGITAL: u8 = 2;
 pub const SLOT_HASHES_SYSVAR: Pubkey = pubkey!("SysvarS1otHashes111111111111111111111111111");
 pub const INSTRUCTIONS_SYSVAR: Pubkey = pubkey!("Sysvar1nstructions1111111111111111111111111");
 
-/// The trusted settler may act only this long after expiry.
+/// The trusted settler may act only this long after expiry. The `preview`
+/// build (private demo chain without Switchboard) settles at expiry instead.
+#[cfg(not(feature = "preview"))]
 pub const FALLBACK_DELAY: i64 = 72 * 3600;
+#[cfg(feature = "preview")]
+pub const FALLBACK_DELAY: i64 = 0;
 /// Oracle quotes older than this many slots are rejected (about 60 s).
 pub const MAX_QUOTE_AGE_SLOTS: u64 = 150;
 /// Switchboard feed values are fixed point with 18 decimals; quote atoms use 6.
