@@ -6,3 +6,4 @@ program/target/
 app/state/
 app/sbquote.mjs
 preview-ledger/
+.claude/
