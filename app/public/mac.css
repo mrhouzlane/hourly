@@ -1092,3 +1092,18 @@ body { font-size: 17px; }
   .options.pm2 { gap: 6px; } .panel .lead { margin: 4px 0 12px; font-size: 15px; }
   .panel h2 { font-size: 26px; }
 }
+
+/* v26: no green or red. Higher = blue, Lower = ink. */
+:root { --up: #2f6bff; --dn: #0b1022; }
+.up { color: #2f6bff !important; } .dn { color: #0b1022 !important; }
+.asset .up { color: #2f6bff !important; } .asset .dn { color: #0b1022 !important; }
+.lt i.higher { color: #2f6bff; } .lt i.lower { color: #0b1022; }
+.ldot { background: #2f6bff; box-shadow: 0 0 0 0 rgba(47,107,255,.5); }
+.options.pm .opt.up { background: #2f6bff; } .options.pm .opt.dn { background: #0b1022; }
+.opt.row2::before { background: rgba(47,107,255,.14); } .opt.row2.dn::before { background: rgba(11,16,34,.1); }
+.opt.row2 .ch small { background: #2f6bff; } .opt.row2.dn .ch small { background: #0b1022; }
+.crow2 .cl.up { color: #7fa8ff !important; } .crow2 .cl.dn { color: #fff !important; }
+.lastcall .dir.higher { color: #7fa8ff; } .lastcall .dir.lower { color: #fff; }
+.live .up, .live .dn { color: inherit !important; }
+.dir.higher, .dir.lower { color: inherit; }
+.tcard .dir.higher { color: #2f6bff; } .tcard .dir.lower { color: #0b1022; }
