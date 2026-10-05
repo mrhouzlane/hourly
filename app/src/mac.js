@@ -1,4 +1,5 @@
 import { char } from "./chars.mjs";
+import { homeView, bindHome } from "./home.js";
 // Hourly, System 7 edition. One decision per screen; the chart shows your
 // level and your date as you pick them. Bundled by esbuild into public/mac.js.
 import { getWallets } from "@wallet-standard/app";
@@ -48,7 +49,7 @@ async function api(path, body) {
 // ---------- state ----------
 const S = {
   status: null, index: [], markets: [], vaults: [], activity: null, portfolio: null, wallet: null,
-  view: "trade",
+  view: "home",
   t: { step: 1, gpu: "H100_SXM", side: null, strike: null, seriesId: null, amount: 10, quote: null, hl: 0 },
   hedge: { gpu: "H100_SXM", role: "own", collar: false },
   feedWin: "24h",
@@ -218,14 +219,13 @@ function slidePill(box, key) {
 function renderMenu() {
   const g = S.index.find((x) => x.code === "H100_SXM");
   $("#menubar").innerHTML = `
-    <button data-view="about" class="brand" title="About Hourly">Hourly</button>
+    <button data-view="home" class="brand" title="Home">Hourly</button>
     ${[["trade", "Trade"], ["hedge", "Protect & Earn"], ["thesis", "Thesis"]]
       .map(([k, t]) => `<button data-view="${k}" class="${S.view === k || (k === "hedge" && S.view === "earn") ? "on" : ""}">${t}</button>`).join("")}
     <span class="spacer"></span>
     <button id="wallet-btn">${S.wallet ? `${S.wallet.address.slice(0, 4)}…${S.wallet.address.slice(-4)}` : "Connect"}</button>`;
   slidePill($("#menubar"), "menu");
   $$("#menubar [data-view]").forEach((b) => b.addEventListener("click", () => {
-    if (b.dataset.view === "about") return aboutBox();
     S.view = b.dataset.view; renderMenu(); render();
   }));
   $("#wallet-btn").addEventListener("click", () => {
@@ -1061,11 +1061,12 @@ function bindThesis() {
 }
 function render() {
   const sub = () => `<div class="subtabs"><button data-sub="hedge" class="${S.view === "hedge" ? "on" : ""}">Protect</button><button data-sub="earn" class="${S.view === "earn" ? "on" : ""}">Earn</button></div>`;
-  const views = { trade: tradeView, chain: chainView, hedge: () => sub() + hedgeView(), earn: () => sub() + earnView(), activity: activityView, portfolio: portfolioView, thesis: thesisView };
+  const views = { trade: tradeView, chain: chainView, hedge: () => sub() + hedgeView(), earn: () => sub() + earnView(), activity: activityView, portfolio: portfolioView, thesis: thesisView, home: homeView };
   $("#desk").innerHTML = S.view === "trade" ? `<div class="shell"><div class="main">${heroHtml()}${views.trade()}</div>${liveHtml()}</div>` : views[S.view]();
   document.body.classList.toggle("fit", S.view === "trade");
+  document.body.classList.toggle("onhome", S.view === "home");
   $$("[data-home]").forEach((b) => b.addEventListener("click", () => { S.view = "trade"; renderMenu(); render(); }));
-  ({ trade: bindTrade, chain: bindChain, hedge: bindHedge, earn: bindEarn, activity: bindActivity, portfolio: bindPortfolio, thesis: bindThesis })[S.view]();
+  ({ trade: bindTrade, chain: bindChain, hedge: bindHedge, earn: bindEarn, activity: bindActivity, portfolio: bindPortfolio, thesis: bindThesis, home: () => bindHome((v) => { S.view = v; renderMenu(); render(); scrollTo(0, 0); }) })[S.view]();
   slidePill($(".steps"), "steps");
   $$("[data-view-go]").forEach((b) => b.addEventListener("click", () => { S.view = b.dataset.viewGo; renderMenu(); render(); }));
   if (S.view === "trade") { bindActivity(); $$("[data-pick]").forEach((b) => b.addEventListener("click", () => startFrom(b.dataset.pick, null))); }
@@ -1106,6 +1107,7 @@ async function refreshActivity() { try { S.activity = await api("activity"); } c
   setInterval(async () => {
     if (document.querySelector(".modal") || (S.view === "trade" && S.t.step >= 4)) return;
     await Promise.all([refreshMarkets(), refreshActivity()]);
+    if (S.view === "home" || S.view === "thesis") return;
     if (S.view !== "trade" || S.t.step <= 3) { renderMenu(); render(); }
   }, 30_000);
 })();
