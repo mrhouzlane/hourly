@@ -164,7 +164,7 @@ function ensureWallet(then) { if (S.wallet) return then(); walletPicker(then); }
 function renderMenu() {
   const g = S.index.find((x) => x.code === "H100_SXM");
   $("#menubar").innerHTML = `
-    <button data-view="about" title="About Hourly"><span class="mark"></span></button>
+    <button data-view="about" title="About Hourly"><img class="logo" src="mark.svg" alt=""></button>
     ${[["trade", "Trade"], ["hedge", "Hedge"], ["earn", "Earn"], ["activity", "Activity"], ["portfolio", "Portfolio"]]
       .map(([k, t]) => `<button data-view="${k}" class="${S.view === k ? "on" : ""}">${t}</button>`).join("")}
     <span class="spacer"></span>
@@ -342,24 +342,24 @@ function chartSvg() {
     const yl = Y(lv);
     const winTop = t.side === "higher" ? T : yl, winH = t.side === "higher" ? yl - T : H - B - yl;
     extra += `<rect x="${L}" y="${winTop}" width="${W - L - R}" height="${Math.max(0, winH)}" fill="url(#dith)" opacity="0.55"/>`;
-    extra += `<line x1="${L}" x2="${W - R}" y1="${yl}" y2="${yl}" stroke="#000" stroke-width="2" stroke-dasharray="6 4"/>`;
+    extra += `<line x1="${L}" x2="${W - R}" y1="${yl}" y2="${yl}" stroke="#2f6bff" stroke-width="2" stroke-dasharray="6 4"/>`;
     extra += `<text x="${W - R + 6}" y="${yl + 4}">$${lv.toFixed(2)}</text>`;
   }
   if (dateM) {
     const xd = X(Date.parse(`${dateM.windowEnd}T00:00:00Z`));
-    extra += `<line x1="${xd}" x2="${xd}" y1="${T}" y2="${H - B}" stroke="#000" stroke-dasharray="1 3"/>`;
+    extra += `<line x1="${xd}" x2="${xd}" y1="${T}" y2="${H - B}" stroke="#0b1b45" stroke-dasharray="1 3"/>`;
     extra += `<text x="${xd}" y="${H - 8}" text-anchor="end">${day(dateM.windowEnd)}</text>`;
     if (dateM.model) {
       const a = Y(dateM.model.settleP90), b = Y(dateM.model.settleP10);
-      extra += `<path d="M${xd - 8},${a} H${xd} V${b} H${xd - 8}" fill="none" stroke="#000" stroke-width="2"/>`;
+      extra += `<path d="M${xd - 8},${a} H${xd} V${b} H${xd - 8}" fill="none" stroke="#0b1b45" stroke-width="2"/>`;
     }
   }
   const lp = pts[pts.length - 1];
   return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Recent prints with your level and date">
-    <defs><pattern id="dith" width="2" height="2" patternUnits="userSpaceOnUse"><rect width="1" height="1" fill="#000"/><rect x="1" y="1" width="1" height="1" fill="#000"/></pattern></defs>
+    <defs><pattern id="dith" width="2" height="2" patternUnits="userSpaceOnUse"><rect width="1" height="1" fill="#2f6bff"/><rect x="1" y="1" width="1" height="1" fill="#2f6bff"/></pattern></defs>
     ${extra}
-    <path d="${path}" fill="none" stroke="#000" stroke-width="2" stroke-dasharray="${len}" stroke-dashoffset="${len}" style="animation: draw .9s steps(18) forwards"/>
-    <rect x="${lp[0] - 3}" y="${lp[1] - 3}" width="6" height="6" fill="#000"/>
+    <path d="${path}" fill="none" stroke="#0b1b45" stroke-width="2.5" stroke-dasharray="${len}" stroke-dashoffset="${len}" style="animation: draw .9s steps(18) forwards"/>
+    <rect x="${lp[0] - 3}" y="${lp[1] - 3}" width="6" height="6" fill="#2f6bff"/>
     <text x="${L}" y="${H - 8}">${day(hist[0][0])}</text>
     <style>@keyframes draw{to{stroke-dashoffset:0}}</style>
   </svg>`;
@@ -494,10 +494,10 @@ function hedgeChart(put, call, role, collar) {
   const xs = [xlo, put.strike - put.cap, put.strike, call.strike, call.strike + call.cap, xhi].sort((a, b) => a - b);
   const path = xs.map((s, i) => `${i ? "L" : "M"}${X(s).toFixed(1)},${Math.min(H - 4, Yp(payAt(s))).toFixed(1)}`).join(" ");
   return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Payout against the month's average">
-    <defs><pattern id="dith" width="2" height="2" patternUnits="userSpaceOnUse"><rect width="1" height="1" fill="#000"/><rect x="1" y="1" width="1" height="1" fill="#000"/></pattern></defs>
-    ${bars}<line x1="0" x2="${W}" y1="${base}" y2="${base}" stroke="#000"/>
-    <path d="${path}" fill="none" stroke="#000" stroke-width="3"/>
-    <line x1="${X(today)}" x2="${X(today)}" y1="${T}" y2="${base}" stroke="#000" stroke-dasharray="1 3"/>
+    <defs><pattern id="dith" width="2" height="2" patternUnits="userSpaceOnUse"><rect width="1" height="1" fill="#2f6bff"/><rect x="1" y="1" width="1" height="1" fill="#2f6bff"/></pattern></defs>
+    ${bars}<line x1="0" x2="${W}" y1="${base}" y2="${base}" stroke="#0b1b45"/>
+    <path d="${path}" fill="none" stroke="#0b1b45" stroke-width="3"/>
+    <line x1="${X(today)}" x2="${X(today)}" y1="${T}" y2="${base}" stroke="#0b1b45" stroke-dasharray="1 3"/>
     <text x="${X(today)}" y="${T - 6}" text-anchor="middle">today $${today.toFixed(2)}</text>
     <text x="${X(role === "own" ? put.strike : call.strike)}" y="${H - 10}" text-anchor="middle">$${(role === "own" ? put.strike : call.strike).toFixed(2)}</text>
   </svg>`;
@@ -708,7 +708,7 @@ function bindPortfolio() {
 function aboutBox() {
   const st = S.status || {};
   const bt = st.backtest && st.backtest.result ? st.backtest.result.find((r) => r.horizonDays === 7) : null;
-  dialog(`<div class="icon"><span class="mark"></span></div><b>Hourly</b>
+  dialog(`<div class="icon"><img class="logo" src="mark.svg" alt=""></div><b>Hourly</b>
     <p>Options on the price of renting an AI chip. Every contract is fully backed in USDC and settled by a Switchboard oracle that averages Ornn's daily print. The Solana program checks the oracle's signatures before it pays anyone.</p>
     ${bt ? `<p class="small">Model check, out of sample: ${pct(bt.coverage)} of prints landed inside its 80% range 7 days out. Brier ${bt.brier.toFixed(3)} against ${bt.brierCoin.toFixed(3)} for a coin.</p>` : ""}
     <p class="small mono">program ${esc(st.programId || "")}<br>network ${esc(st.cluster || "")}</p>
