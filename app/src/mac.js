@@ -298,21 +298,14 @@ function marqueeHtml() {
 function assetsHtml() {
   const cards = GPU_ORDER.map((c) => S.index.find((x) => x.code === c)).filter(Boolean).map((g) => {
     const k = CHIPS[g.code] || {};
-    const on = S.t.gpu === g.code;
-    return `<button class="asset ${on ? "on" : ""}" data-asset="${g.code}" style="--h:${k.hue || "#2f6bff"}">
-      <div class="art">${chipArt(g.code, true)}<span class="arch">${esc(k.arch || "")}</span></div>
-      <div class="ah"><b>${esc(g.label)}</b><span>${esc(k.maker || "")} · ${esc(k.mem || "")}</span></div>
-      <p>${esc(k.tag || "")}</p>
-      <div class="tags">${(k.uses || []).map((u) => `<i>${esc(u)}</i>`).join("")}</div>
-      <div class="ap"><span class="pr">$${g.last.toFixed(2)}<small>/hr</small></span><em class="${g.chg7 >= 0 ? "up" : "dn"}">${g.chg7 >= 0 ? "▲" : "▼"} ${(Math.abs(g.chg7) * 100).toFixed(1)}% 7d</em></div>
-      ${spark(g.history)}
-      <span class="go">Trade ${esc(g.label)} <i>→</i></span></button>`;
+    return `<button class="asset ${S.t.gpu === g.code ? "on" : ""}" data-asset="${g.code}" style="--h:${k.hue || "#2f6bff"}">
+      <div class="art">${chipArt(g.code, true)}</div>
+      <div class="ah"><b>${esc(g.label)}</b><span>${esc(k.arch || "")} · ${esc(k.mem || "")}</span></div>
+      <div class="ap"><span class="pr">$${g.last.toFixed(2)}<small>/hr</small></span><em class="${g.chg7 >= 0 ? "up" : "dn"}">${g.chg7 >= 0 ? "▲" : "▼"} ${(Math.abs(g.chg7) * 100).toFixed(1)}%</em></div></button>`;
   }).join("");
-  return `<section class="assets"><div class="sech"><div class="eyebrow">01 / THE ASSETS</div><h2 class="big">Four chips. One hourly price each.</h2></div><div class="agrid">${cards}</div></section>`;
+  return `<section class="assets"><div class="agrid">${cards}</div></section>`;
 }
 function explainHtml() {
-  const g = S.index.find((x) => x.code === "H100_SXM");
-  const open = S.markets.filter((m) => m.status === "open").length;
   const ic = {
     chip: '<rect x="8" y="8" width="24" height="24" rx="4"/><path d="M14 4v4M20 4v4M26 4v4M14 32v4M20 32v4M26 32v4M4 14h4M4 20h4M4 26h4M32 14h4M32 20h4M32 26h4"/><rect x="15" y="15" width="10" height="10" rx="2"/>',
     index: '<path d="M6 32V20M14 32V12M22 32V22M30 32V6M36 32H4"/>',
@@ -320,27 +313,16 @@ function explainHtml() {
     lock: '<rect x="8" y="17" width="24" height="17" rx="3"/><path d="M13 17v-5a7 7 0 0 1 14 0v5"/><circle cx="20" cy="26" r="2"/>',
   };
   const nodes = [
-    ["chip", "GPU-hour", "The price to rent one AI chip for one hour. It moves every day with demand for training and inference.", "RENT PRICE"],
-    ["index", "OCPI", "Ornn's Compute Price Index. One print a day per chip, the number every contract here settles on.", "DAILY PRINT"],
-    ["eye", "Oracle-settled", "A Switchboard oracle averages the print and signs it. The Solana program checks the signatures before paying.", "SIGNED ON-CHAIN"],
-    ["lock", "Fully backed", "Every contract is locked in USDC when it is sold. The most you can lose is what you put in.", "USDC ESCROW"],
+    ["chip", "Chip rent", "One price per chip, per hour"],
+    ["index", "Daily print", "Ornn's index sets the number"],
+    ["eye", "Oracle", "Signed and checked on-chain"],
+    ["lock", "USDC escrow", "Every contract fully backed"],
   ];
-  const lines = [
-    `index.read     H100_SXM  ->  ${g ? "$" + g.last.toFixed(2) : "..."} / GPU-hour`,
-    `markets.open   ${open} contracts, all fully collateralized`,
-    "oracle.settle  switchboard mean(print)  ->  signatures verified on-chain",
-    "escrow.payout  winners claim USDC from the locked escrow",
-  ];
-  return `<section class="explain"><div class="sech"><div class="eyebrow"><i class="pulse"></i>02 / HOW IT WORKS</div><h2 class="big">From a rented chip<br>to a settled contract.</h2></div>
-    <div class="flow">
-      <div class="rail"><i></i><b class="pk p1"></b><b class="pk p2"></b><b class="pk p3"></b></div>
-      <div class="fnodes">${nodes.map(([i, k, v, tag], n) => `<div class="fnode" style="--i:${n}">
+  return `<section class="explain"><div class="flow">
+      <div class="rail"><i></i><b class="pk p1"></b><b class="pk p2"></b></div>
+      <div class="fnodes">${nodes.map(([i, k, v], n) => `<div class="fnode" style="--i:${n}">
         <div class="orb"><svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ic[i]}</svg></div>
-        <span class="step">0${n + 1} / ${tag}</span><b>${k}</b><p>${v}</p></div>`).join("")}</div>
-    </div>
-    <div class="term"><div class="tbar"><i></i><i></i><i></i><span>hourly.settlement.log</span><em>● live</em></div>
-      <pre>${lines.map((l, n) => `<span class="tl" style="--d:${n * 0.9}s"><u>&gt;</u> ${esc(l)}</span>`).join("")}<span class="caret"></span></pre></div>
-  </section>`;
+        <b>${k}</b><p>${v}</p></div>`).join("")}</div></div></section>`;
 }
 
 // ---------- trade wizard ----------
@@ -1003,21 +985,11 @@ function aboutBox() {
 // ---------- render ----------
 function heroHtml() {
   const gs = GPU_ORDER.map((c) => S.index.find((x) => x.code === c)).filter(Boolean);
-  const top = gs.slice().sort((a, b) => Math.abs(b.chg7) - Math.abs(a.chg7))[0];
-  const open = S.markets.filter((m) => m.status === "open").length;
-  const bt = S.status && S.status.backtest && S.status.backtest.result ? S.status.backtest.result.find((r) => r.horizonDays === 7) : null;
   return `<header class="hero">
-    <div class="heromark">${mascot("big")}<span class="bubble">Time is money.<br>Compute is both.</span></div>
-    <div class="eyebrow"><i class="pulse"></i>THE COMPUTE EXCHANGE / AI CHIPS, PRICED BY THE HOUR</div>
+    <div class="heromark">${mascot("big")}</div>
     <h1>Trade the price<br>of <span class="grad">AI compute.</span></h1>
-    <p class="sub">Every model runs on rented GPUs, and the rent changes every day. Take a view on where it goes, or lock in your bill. Fully backed in USDC, settled by oracle on Solana.</p>
-    <div class="kpis">
-      <div><b>${gs.length}</b><span>AI chips listed</span></div>
-      <div><b>${open}</b><span>open markets</span></div>
-      ${top ? `<div><b class="${top.chg7 >= 0 ? "up" : "dn"}">${top.chg7 >= 0 ? "+" : "-"}${(Math.abs(top.chg7) * 100).toFixed(1)}%</b><span>${esc(top.label)}, biggest 7d move</span></div>` : ""}
-      ${bt ? `<div><b>${Math.round(bt.coverage * 100)}%</b><span>of prints inside our range</span></div>` : ""}
-    </div>
-  </header>${gs.length ? marqueeHtml() : ""}${gs.length ? assetsHtml() : ""}`;
+    <p class="sub">Bet on what AI chips cost to rent, or lock in your own bill. Fully backed, settled on Solana.</p>
+  </header>${gs.length ? assetsHtml() : ""}`;
 }
 function render() {
   const views = { trade: tradeView, chain: chainView, hedge: hedgeView, earn: earnView, activity: activityView, portfolio: portfolioView };

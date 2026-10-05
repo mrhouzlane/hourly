@@ -655,3 +655,18 @@ h2.big { font-family: var(--text); font-weight: 800; font-size: clamp(28px, 4vw,
 @media (max-width: 960px) { .fnodes { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 28px; } .rail { display: none; } }
 @media (max-width: 560px) { .fnodes { grid-template-columns: 1fr; } .tl { white-space: normal; max-width: 100%; animation: none; } }
 @media (prefers-reduced-motion: reduce) { .pk, .orb, .caret { animation: none !important; } .tl { max-width: 100%; animation: none; } }
+
+/* ======== v10: essentials only ======== */
+.hero .sub { font-size: 17px; margin: 14px 0 0; max-width: 520px; }
+.heromark { margin-bottom: 6px; }
+.hero { margin-bottom: 36px; }
+.asset { padding: 12px; gap: 6px; }
+.asset .ah b { font-size: 22px; }
+.asset .ap { margin-top: 0; }
+.explain { margin-top: 44px; }
+.flow { padding: 26px 22px 22px; }
+.rail { top: 58px; }
+.fnode { gap: 4px; }
+.fnode b { font-size: 18px; margin-top: 8px; }
+.fnode p { font-size: 12.5px; }
+.orb { width: 56px; height: 56px; border-radius: 17px; } .orb svg { width: 28px; height: 28px; }
