@@ -32,7 +32,7 @@ contract HourlyVault is ERC20, EIP712, ReentrancyGuard, IERC1155Receiver {
     using SafeERC20 for IERC20;
 
     bytes32 public constant VAULT_QUOTE_TYPEHASH = keccak256(
-        "VaultQuote(uint256 seriesId,address taker,bool vaultSells,uint256 qty,uint256 premium,uint64 quoteExpiry,uint256 nonce)"
+        "VaultQuote(uint256 seriesId,address taker,bool vaultSells,uint256 qty,uint256 premium,uint64 quoteExpiry,uint256 nonce,uint16 maxFeeBps)"
     );
 
     struct VaultQuote {
@@ -43,6 +43,7 @@ contract HourlyVault is ERC20, EIP712, ReentrancyGuard, IERC1155Receiver {
         uint256 premium;
         uint64 quoteExpiry;
         uint256 nonce;
+        uint16 maxFeeBps; // reverts if the live protocol fee exceeds this
     }
 
     struct VaultSeries {
@@ -66,10 +67,16 @@ contract HourlyVault is ERC20, EIP712, ReentrancyGuard, IERC1155Receiver {
     error VaultNotTrading();
     error SeriesOutsideEpoch();
     error QuoteUsed();
+    error FeeTooHigh();
+    error PremiumOutOfBounds();
+    error TradeTooLarge();
+    error EpochRiskLimit();
 
     event Deposited(address indexed lp, uint256 amount);
     event Traded(uint256 indexed seriesId, address indexed taker, bool vaultSells, uint256 qty, uint256 premium, uint256 fee);
     event Collected(uint256 indexed seriesId, uint256 amount);
+    event MaxEpochBpsSet(uint16 bps);
+    event MaxTradeBpsSet(uint16 bps);
     event Withdrawn(address indexed lp, uint256 shares, uint256 amount);
 
     Hourly public immutable hourly;
@@ -79,6 +86,19 @@ contract HourlyVault is ERC20, EIP712, ReentrancyGuard, IERC1155Receiver {
     uint64 public immutable depositEnd;
     uint64 public immutable epochEnd;
     uint16 public immutable maxSeriesBps;
+
+    /// Premium bounds, as bps of the contract's max payoff (collateral per contract).
+    /// The vault never pays more than 95% of max payoff to buy, and never sells below 1%.
+    uint256 public constant MAX_BUY_PREMIUM_BPS = 9_500;
+    uint256 public constant MIN_SELL_PREMIUM_BPS = 100;
+
+    /// Epoch-wide cap on collateral at risk summed over every series
+    /// (qty * collateralPerContract on either side, never netted down), as bps of
+    /// deposits. Default 50%. Admin-settable within 1..10000.
+    uint16 public maxEpochBps = 5_000;
+    /// Cap on one trade's qty * collateralPerContract, bps of deposits. Default 10%.
+    uint16 public maxTradeBps = 1_000;
+    uint256 public atRisk;
 
     uint256 public deposits;
     uint256 public premiums;
@@ -90,7 +110,10 @@ contract HourlyVault is ERC20, EIP712, ReentrancyGuard, IERC1155Receiver {
         ERC20(string.concat("Hourly vault epoch ", _u2s(epoch_)), string.concat("hvLP-", _u2s(epoch_)))
         EIP712("HourlyVault", "1")
     {
-        if (msg.sender != hourly_.admin()) revert Unauthorized();
+        // The lister creates vaults; the quoter is its own hot key and must not
+        // be the governance key.
+        if (msg.sender != hourly_.lister()) revert Unauthorized();
+        if (quoter_ == address(0) || quoter_ == hourly_.admin()) revert Unauthorized();
         if (depositEnd_ >= epochEnd_) revert BadTerms();
         if (maxSeriesBps_ == 0 || maxSeriesBps_ > 10_000) revert BadTerms();
         hourly = hourly_;
@@ -103,6 +126,20 @@ contract HourlyVault is ERC20, EIP712, ReentrancyGuard, IERC1155Receiver {
         // Hourly pulls collateral and fees from the vault; it never pulls more
         // than the call it is serving computes.
         quoteToken.forceApprove(address(hourly_), type(uint256).max);
+    }
+
+    function setMaxEpochBps(uint16 bps) external {
+        if (msg.sender != hourly.admin()) revert Unauthorized();
+        if (bps == 0 || bps > 10_000) revert BadTerms();
+        maxEpochBps = bps;
+        emit MaxEpochBpsSet(bps);
+    }
+
+    function setMaxTradeBps(uint16 bps) external {
+        if (msg.sender != hourly.admin()) revert Unauthorized();
+        if (bps == 0 || bps > 10_000) revert BadTerms();
+        maxTradeBps = bps;
+        emit MaxTradeBpsSet(bps);
     }
 
     function decimals() public pure override returns (uint8) {
@@ -131,7 +168,7 @@ contract HourlyVault is ERC20, EIP712, ReentrancyGuard, IERC1155Receiver {
         return _hashTypedDataV4(
             keccak256(
                 abi.encode(
-                    VAULT_QUOTE_TYPEHASH, q.seriesId, q.taker, q.vaultSells, q.qty, q.premium, q.quoteExpiry, q.nonce
+                    VAULT_QUOTE_TYPEHASH, q.seriesId, q.taker, q.vaultSells, q.qty, q.premium, q.quoteExpiry, q.nonce, q.maxFeeBps
                 )
             )
         );
@@ -155,6 +192,16 @@ contract HourlyVault is ERC20, EIP712, ReentrancyGuard, IERC1155Receiver {
         nonceUsed[q.nonce] = true;
 
         uint256 per = HourlyMath.collateralPerContract(s.cap, s.units);
+        uint256 notional = per * q.qty;
+        // The quoter is a hot key: bound what one signature can do.
+        if (q.vaultSells) {
+            if (q.premium < (notional * MIN_SELL_PREMIUM_BPS) / 10_000) revert PremiumOutOfBounds();
+        } else {
+            if (q.premium > (notional * MAX_BUY_PREMIUM_BPS) / 10_000) revert PremiumOutOfBounds();
+        }
+        if (notional > (deposits * maxTradeBps) / 10_000) revert TradeTooLarge();
+        atRisk += notional;
+        if (atRisk > (deposits * maxEpochBps) / 10_000) revert EpochRiskLimit();
         VaultSeries storage vs = vaultSeries[q.seriesId];
         uint256 newSide = (q.vaultSells ? vs.short : vs.long) + q.qty;
         if (newSide * per > (deposits * maxSeriesBps) / 10_000) revert VaultLimit();
@@ -165,6 +212,7 @@ contract HourlyVault is ERC20, EIP712, ReentrancyGuard, IERC1155Receiver {
             openSeries += 1;
         }
 
+        if (hourly.feeBps() > q.maxFeeBps) revert FeeTooHigh();
         uint256 fee = HourlyMath.feeFor(q.premium, hourly.feeBps());
         if (q.vaultSells) {
             // premium and fee: taker -> vault; Hourly then takes collateral + fee from the vault

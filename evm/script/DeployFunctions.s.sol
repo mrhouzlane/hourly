@@ -68,7 +68,8 @@ contract DeployFunctions is Script {
             vm.envOr("TREASURY", deployer),
             vm.envOr("SETTLER", deployer),
             adapter,
-            uint16(vm.envOr("FEE_BPS", uint256(100)))
+            uint16(vm.envOr("FEE_BPS", uint256(100))),
+            vm.envOr("LISTER", deployer)
         );
         adapter.bind(hourly);
         bytes32 sourceHash = adapter.registerSource(source);

@@ -223,3 +223,30 @@ Add `set_admin` with a two-step transfer.
 - A vault's withdrawals stay locked (`lib.rs:734`, `HourlyVault.sol:215`) until every touched series is settled. If both the oracle and the settler fail, LP funds stay locked with no escape hatch. Consider an admin `settle` after a long delay, which already exists through the fallback, and document it.
 - Long tokens sent directly to `vault_long`, or ERC-1155 tokens sent to HourlyVault (the hook accepts any transfer that comes through Hourly), are never redeemed. Only the sender loses.
 - `LpVault.premiums` and `Series.period_start` are written but never enforced.
+
+---
+
+## Fixed (EVM side)
+
+Regression tests: `evm/test/SecurityReview.t.sol` (13 tests, flipped from the old proofs) and `test_L6_*` in `evm/test/ChainlinkFunctions.t.sol`. Solana items (`program/`, `app/`) are not covered here.
+
+- **H1 (EVM): fixed.** `HourlyVault.trade` now reverts with `PremiumOutOfBounds` unless the premium is at most 95% of `qty x collateralPerContract` when the vault buys, and at least 1% of it when the vault sells. `maxTradeBps` (default 10% of deposits) caps one trade, and `maxEpochBps` (default 50%, admin-settable within 1..10000) caps the sum of notional across all series. The quoter must not be the admin, and only the lister can create a vault. The old exploit ($990 for a $1 contract) now reverts.
+- **H2 (EVM): fixed.** New `lister` role (constructor arg, admin can rotate with `setLister`) owns `createSeries` and `setVault`. `admin` can no longer list; it keeps `setFee`, `setSettler`, `setPaused`, `setMinPremium`, `setLister`. The settler and quoter are separate keys. Deploy scripts read `LISTER`. The admin must be a multisig at deployment for this to mean anything.
+- **M1 analog (EVM): verified, no change needed beyond H2.** There is no initializer. Hourly and the vault set every role in the constructor, and the Chainlink adapter's `bind` is deployer-only and one-shot (`test_cl_bind_once_*`). `test_M1_no_initializer_exists` pins it.
+- **L2: fixed.** `maxFeeBps` is in the EIP-712 `Quote` (and `VaultQuote`). The fill reverts with `FeeTooHigh` if the live fee is higher.
+- **L3 (EVM): fixed.** `minPremium` (default 10,000 atoms = 0.01 USDC, admin-settable) is enforced in `fill`, `fillBatch` and `vaultFill`; below it the fill reverts with `PremiumTooLow`. This also covers the vault-buy path. Who pays the fee in vault-buy is unchanged (LPs); the LP terms should say so.
+- **L6: fixed.** `requestSettlement` allows at most `MAX_ATTEMPTS` = 3 requests per series and enforces the `retryAfter` cooldown after every request, including after an error response. When the cap is reached the fallback settler settles after 72 h.
+
+## Fixed (Solana program and venue), 2026-10-05
+
+- **H1 fixed.** `vault_buy` refuses a premium above 95% of max payoff and `vault_sell` one below 1% (`VaultPrice`, 6021). An epoch-wide cap (`max_epoch_bps`, 50% by default) bounds total capital at risk across all markets. `sr_h1_quoter_cannot_drain_vault_any_more` now proves the $990 drain is refused and LP cash stays intact.
+- **H2 fixed.** New `lister` role in config for `create_series` and `create_vault`; the venue uses separate `payer` (fees and rent, no authority) and `lister` keys. The admin (intended multisig) only signs setters and init.
+- **M1 fixed for mainnet.** Builds with `HOURLY_INIT_AUTHORITY=<deployer>` reject any other initialiser. Dev and test builds stay open (documented test).
+- **M2 fixed.** Oracle settlement opens 2 h after expiry (`ORACLE_GRACE`), and the quote must carry at least `min_oracle_sigs` signatures (config, admin-settable).
+- **M3 fixed.** The keeper fetches the stored feed back from crossbar and compares url, JSONPath and aggregation before listing.
+- **M4 fixed.** Minimum trade $0.50 of premium; at most 12 venue-paid new accounts per wallet per day.
+- **M5 fixed.** From 19:55 UTC until the day's print is in the venue's data (2-minute refresh), quoting stops on every market.
+- **L4 fixed.** Rate limits use the last X-Forwarded-For hop (added by Caddy). Venue-signed transactions are always sent with preflight, so failing copies cost nothing.
+- **L5 fixed.** Default build is mainnet; devnet needs `--features devnet`; `preview` without `devnet` is a compile error.
+- **L7 fixed.** The desk refuses to buy beyond `makerMaxLong` per market.
+- **L1, L3 open by design.** The backup settler stays (72 h); the buyer-pays-fee rule stays, and the $0.50 minimum makes zero-premium fee skipping impossible through the venue.

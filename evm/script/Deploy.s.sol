@@ -51,7 +51,7 @@ contract Deploy is Script {
             : ISettlementOracle(
                 address(new SwitchboardSettlementOracle(ISwitchboardOnDemand(sb), vm.envOr("SB_MAX_AGE", uint256(3600))))
             );
-        Hourly hourly = new Hourly(IERC20(usdc), deployer, treasury, settler, oracle, feeBps);
+        Hourly hourly = new Hourly(IERC20(usdc), deployer, treasury, settler, oracle, feeBps, vm.envOr("LISTER", deployer));
         vm.stopBroadcast();
 
         console.log("chainId", id);

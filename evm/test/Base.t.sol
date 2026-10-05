@@ -46,7 +46,7 @@ abstract contract Base is Test {
         sb = new MockSwitchboard();
         sb.setOracle(oracleSigner, true);
         oracle = new SwitchboardSettlementOracle(ISwitchboardOnDemand(address(sb)), 1 hours);
-        hourly = new Hourly(usdc, admin, treasury, settler, oracle, FEE_BPS);
+        hourly = new Hourly(usdc, admin, treasury, settler, oracle, FEE_BPS, admin);
     }
 
     // ------------------------------------------------------------ helpers
@@ -77,7 +77,8 @@ abstract contract Base is Test {
             qty: qty,
             premium: premium,
             quoteExpiry: quoteExpiry,
-            nonce: nextNonce++
+            nonce: nextNonce++,
+            maxFeeBps: 500
         });
     }
 
