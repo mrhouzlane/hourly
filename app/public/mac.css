@@ -1148,3 +1148,25 @@ body { background: var(--b50); color: var(--ink); }
 .options.pm .glyph { position: absolute; top: 16px; right: 16px; width: 30px; height: 30px; font-size: 13px; }
 .options.pm .opt { position: relative; }
 .how { color: #4a5f9e; font-size: 14px; line-height: 1.5; margin: 16px 0 0; }
+
+/* v29: thesis */
+.thesis { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 48px; max-width: 1040px; margin: 0 auto; align-items: start; }
+.toc { position: sticky; top: 84px; display: flex; flex-direction: column; gap: 2px; }
+.toc b { font: 400 30px var(--serif); color: var(--navy); margin-bottom: 10px; }
+.toc a { color: #4a5f9e; text-decoration: none; padding: 7px 12px; border-radius: 10px; font-size: 14px; font-weight: 600; transition: background .2s, color .2s; }
+.toc a:hover { background: var(--b100); color: var(--blue); }
+.doc { font-size: 17px; line-height: 1.7; color: var(--ink); padding-bottom: 80px; }
+.doc h1 { font: 400 clamp(44px, 6vw, 72px)/1 var(--serif); letter-spacing: -.01em; color: var(--navy); margin: 0 0 28px; }
+.doc h2 { font: 800 30px/1.15 var(--text); letter-spacing: -.04em; margin: 56px 0 14px; color: var(--navy); scroll-margin-top: 84px; }
+.doc h3 { font: 700 20px var(--text); letter-spacing: -.02em; margin: 30px 0 8px; color: var(--navy); }
+.doc p { margin: 0 0 16px; }
+.doc ul, .doc ol { padding-left: 22px; margin: 0 0 18px; } .doc li { margin: 4px 0; }
+.doc a { color: var(--blue); }
+.doc code { font: 500 .88em "Geist Mono", monospace; background: var(--b100); padding: 2px 6px; border-radius: 6px; }
+.doc pre { background: var(--navy); color: #dbe6ff; padding: 18px 20px; border-radius: 16px; overflow-x: auto; font: 500 13px/1.55 "Geist Mono", monospace; margin: 0 0 20px; }
+.doc .tw { overflow-x: auto; margin: 0 0 22px; border: 1px solid var(--line); border-radius: 16px; background: #fff; }
+.doc table { border-collapse: collapse; width: 100%; font-size: 14.5px; }
+.doc th { text-align: left; background: var(--b100); color: var(--navy); font-weight: 700; padding: 10px 14px; }
+.doc td { padding: 10px 14px; border-top: 1px solid var(--line); vertical-align: top; }
+.doc .note { border-left: 3px solid var(--blue); background: var(--b100); padding: 12px 16px; border-radius: 0 12px 12px 0; }
+@media (max-width: 860px) { .thesis { grid-template-columns: 1fr; gap: 16px; } .toc { position: static; flex-direction: row; flex-wrap: wrap; } .toc b { width: 100%; } }

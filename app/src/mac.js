@@ -219,7 +219,7 @@ function renderMenu() {
   const g = S.index.find((x) => x.code === "H100_SXM");
   $("#menubar").innerHTML = `
     <button data-view="about" class="brand" title="About Hourly">Hourly</button>
-    ${[["trade", "Trade"], ["hedge", "Protect & Earn"]]
+    ${[["trade", "Trade"], ["hedge", "Protect & Earn"], ["thesis", "Thesis"]]
       .map(([k, t]) => `<button data-view="${k}" class="${S.view === k || (k === "hedge" && S.view === "earn") ? "on" : ""}">${t}</button>`).join("")}
     <span class="spacer"></span>
     <button id="wallet-btn">${S.wallet ? `${S.wallet.address.slice(0, 4)}…${S.wallet.address.slice(-4)}` : "Connect"}</button>`;
@@ -1047,13 +1047,25 @@ function liveHtml() {
   return `<aside class="live"><div class="lh"><h3>What the crowd thinks</h3><button class="lall" data-view-go="activity">All calls</button></div>
     <div class="lbody">${rows}</div>${lc}</aside>`;
 }
+let THESIS = null;
+function thesisView() {
+  if (!THESIS) {
+    fetch("thesis.json").then((r) => r.json()).then((j) => { THESIS = j; if (S.view === "thesis") render(); }).catch(() => { THESIS = { title: "Thesis", toc: [], html: "<p>The thesis is not published yet.</p>" }; if (S.view === "thesis") render(); });
+    return '<div class="thesis"><p class="muted">Loading.</p></div>';
+  }
+  return `<div class="thesis"><nav class="toc"><b>Thesis</b>${THESIS.toc.map(([id, t]) => `<a href="#${id}" data-toc="${id}">${esc(t)}</a>`).join("")}</nav>
+    <article class="doc"><h1>${esc(THESIS.title)}</h1>${THESIS.html}</article></div>`;
+}
+function bindThesis() {
+  $$("[data-toc]").forEach((a) => a.addEventListener("click", (e) => { e.preventDefault(); const t = document.getElementById(a.dataset.toc); if (t) t.scrollIntoView({ behavior: "smooth", block: "start" }); }));
+}
 function render() {
   const sub = () => `<div class="subtabs"><button data-sub="hedge" class="${S.view === "hedge" ? "on" : ""}">Protect</button><button data-sub="earn" class="${S.view === "earn" ? "on" : ""}">Earn</button></div>`;
-  const views = { trade: tradeView, chain: chainView, hedge: () => sub() + hedgeView(), earn: () => sub() + earnView(), activity: activityView, portfolio: portfolioView };
+  const views = { trade: tradeView, chain: chainView, hedge: () => sub() + hedgeView(), earn: () => sub() + earnView(), activity: activityView, portfolio: portfolioView, thesis: thesisView };
   $("#desk").innerHTML = S.view === "trade" ? `<div class="shell"><div class="main">${heroHtml()}${views.trade()}</div>${liveHtml()}</div>` : views[S.view]();
   document.body.classList.toggle("fit", S.view === "trade");
   $$("[data-home]").forEach((b) => b.addEventListener("click", () => { S.view = "trade"; renderMenu(); render(); }));
-  ({ trade: bindTrade, chain: bindChain, hedge: bindHedge, earn: bindEarn, activity: bindActivity, portfolio: bindPortfolio })[S.view]();
+  ({ trade: bindTrade, chain: bindChain, hedge: bindHedge, earn: bindEarn, activity: bindActivity, portfolio: bindPortfolio, thesis: bindThesis })[S.view]();
   slidePill($(".steps"), "steps");
   $$("[data-view-go]").forEach((b) => b.addEventListener("click", () => { S.view = b.dataset.viewGo; renderMenu(); render(); }));
   if (S.view === "trade") { bindActivity(); $$("[data-pick]").forEach((b) => b.addEventListener("click", () => startFrom(b.dataset.pick, null))); }
