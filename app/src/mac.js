@@ -183,7 +183,7 @@ function renderMenu() {
 }
 
 function windowShell(title, body) {
-  return `<section class="window"><div class="titlebar"><button class="closebox" aria-label="Close" data-home></button><span>${esc(title)}</span></div>${body}</section>`;
+  return `<section class="window"><div class="titlebar"><span class="sq"><button class="closebox" aria-label="Close" data-home></button><i></i><i></i></span><span class="tt">HOURLY / ${esc(title).toUpperCase()}</span><span class="ar">↗</span></div>${body}</section>`;
 }
 
 // ---------- classic zoom rectangles (Finder open/close motion) ----------
@@ -347,18 +347,18 @@ function chartSvg() {
   }
   if (dateM) {
     const xd = X(Date.parse(`${dateM.windowEnd}T00:00:00Z`));
-    extra += `<line x1="${xd}" x2="${xd}" y1="${T}" y2="${H - B}" stroke="#0b1b45" stroke-dasharray="1 3"/>`;
+    extra += `<line x1="${xd}" x2="${xd}" y1="${T}" y2="${H - B}" stroke="#dbe6ff" stroke-dasharray="1 3"/>`;
     extra += `<text x="${xd}" y="${H - 8}" text-anchor="end">${day(dateM.windowEnd)}</text>`;
     if (dateM.model) {
       const a = Y(dateM.model.settleP90), b = Y(dateM.model.settleP10);
-      extra += `<path d="M${xd - 8},${a} H${xd} V${b} H${xd - 8}" fill="none" stroke="#0b1b45" stroke-width="2"/>`;
+      extra += `<path d="M${xd - 8},${a} H${xd} V${b} H${xd - 8}" fill="none" stroke="#dbe6ff" stroke-width="2"/>`;
     }
   }
   const lp = pts[pts.length - 1];
   return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Recent prints with your level and date">
     <defs><pattern id="dith" width="2" height="2" patternUnits="userSpaceOnUse"><rect width="1" height="1" fill="#2f6bff"/><rect x="1" y="1" width="1" height="1" fill="#2f6bff"/></pattern></defs>
     ${extra}
-    <path d="${path}" fill="none" stroke="#0b1b45" stroke-width="2.5" stroke-dasharray="${len}" stroke-dashoffset="${len}" style="animation: draw .9s steps(18) forwards"/>
+    <path d="${path}" fill="none" stroke="#dbe6ff" stroke-width="2.5" stroke-dasharray="${len}" stroke-dashoffset="${len}" style="animation: draw .9s steps(18) forwards"/>
     <rect x="${lp[0] - 3}" y="${lp[1] - 3}" width="6" height="6" fill="#2f6bff"/>
     <text x="${L}" y="${H - 8}">${day(hist[0][0])}</text>
     <style>@keyframes draw{to{stroke-dashoffset:0}}</style>
@@ -495,9 +495,9 @@ function hedgeChart(put, call, role, collar) {
   const path = xs.map((s, i) => `${i ? "L" : "M"}${X(s).toFixed(1)},${Math.min(H - 4, Yp(payAt(s))).toFixed(1)}`).join(" ");
   return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Payout against the month's average">
     <defs><pattern id="dith" width="2" height="2" patternUnits="userSpaceOnUse"><rect width="1" height="1" fill="#2f6bff"/><rect x="1" y="1" width="1" height="1" fill="#2f6bff"/></pattern></defs>
-    ${bars}<line x1="0" x2="${W}" y1="${base}" y2="${base}" stroke="#0b1b45"/>
-    <path d="${path}" fill="none" stroke="#0b1b45" stroke-width="3"/>
-    <line x1="${X(today)}" x2="${X(today)}" y1="${T}" y2="${base}" stroke="#0b1b45" stroke-dasharray="1 3"/>
+    ${bars}<line x1="0" x2="${W}" y1="${base}" y2="${base}" stroke="#dbe6ff"/>
+    <path d="${path}" fill="none" stroke="#dbe6ff" stroke-width="3"/>
+    <line x1="${X(today)}" x2="${X(today)}" y1="${T}" y2="${base}" stroke="#dbe6ff" stroke-dasharray="1 3"/>
     <text x="${X(today)}" y="${T - 6}" text-anchor="middle">today $${today.toFixed(2)}</text>
     <text x="${X(role === "own" ? put.strike : call.strike)}" y="${H - 10}" text-anchor="middle">$${(role === "own" ? put.strike : call.strike).toFixed(2)}</text>
   </svg>`;
@@ -717,9 +717,20 @@ function aboutBox() {
 }
 
 // ---------- render ----------
+function heroHtml() {
+  const g = S.index.find((x) => x.code === "H100_SXM");
+  const bt = S.status && S.status.backtest && S.status.backtest.result ? S.status.backtest.result.find((r) => r.horizonDays === 7) : null;
+  return `<header class="hero">
+    <div class="eyebrow"><i class="pulse"></i>AI COMPUTE / DEFINED OUTCOMES</div>
+    <div class="herorow">
+      <h1>The price of a chip.<br>Your call.</h1>
+      <div class="aside">Bet on what an hour of AI compute will cost, or lock in your own bill. Fully funded, settled by oracle on Solana.
+        <div class="chiprow">${g ? `<span>H100 <b>$${g.last.toFixed(2)}</b>/hr</span>` : ""}${bt ? `<span>MODEL <b>${Math.round(bt.coverage * 100)}%</b> IN RANGE</span>` : ""}</div></div>
+    </div></header>`;
+}
 function render() {
   const views = { trade: tradeView, hedge: hedgeView, earn: earnView, activity: activityView, portfolio: portfolioView };
-  $("#desk").innerHTML = views[S.view]();
+  $("#desk").innerHTML = (S.view === "trade" ? heroHtml() : "") + views[S.view]();
   $$("[data-home]").forEach((b) => b.addEventListener("click", () => { S.view = "trade"; renderMenu(); render(); }));
   ({ trade: bindTrade, hedge: bindHedge, earn: bindEarn, activity: bindActivity, portfolio: bindPortfolio })[S.view]();
 }
