@@ -126,6 +126,8 @@ const routes = {
       config: cfg ? { admin: cfg.admin.toBase58(), settler: cfg.settler.toBase58(), oracleQueue: cfg.oracleQueue.toBase58() } : null,
       maker: venue.keys.maker.publicKey.toBase58(),
       fallbackDelayHours: 72,
+      // chain id wallets sign for; null hides external wallets (private preview chain)
+      walletChain: process.env.WALLET_CHAIN || (venue.IS_PUBLIC ? `solana:${venue.CLUSTER}` : null),
       feeBps: venue.state.feeBps,
       treasury: venue.state.treasury,
       volScale: model.VOL_SCALE,

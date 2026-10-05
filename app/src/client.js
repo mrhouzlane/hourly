@@ -44,12 +44,12 @@ async function api(path, body) {
 // ---------- state ----------
 const S = { index: [], markets: [], status: null, gpu: "H100_SXM", door: "predict", wallet: null, portfolio: null };
 const PUBLIC_CLUSTERS = { devnet: "solana:devnet", mainnet: "solana:mainnet" };
-const isPublic = () => !!(S.status && PUBLIC_CLUSTERS[S.status.cluster]);
-const chainId = () => (S.status && PUBLIC_CLUSTERS[S.status.cluster]) || "solana:localnet";
+const isPublic = () => !!(S.status && S.status.walletChain);
+const chainId = () => (S.status && S.status.walletChain) || "solana:localnet";
 
 // MetaMask's Solana accounts join the Wallet Standard registry through its SDK.
 async function registerMetaMask() {
-  if (!isPublic()) return;
+  if (!isPublic() || !PUBLIC_CLUSTERS[S.status.cluster]) return;
   try {
     const net = S.status.cluster;
     await createSolanaClient({
@@ -681,7 +681,10 @@ async function refreshPortfolio() {
       if (r.short > 0) act += `<button class="pill small" type="button" data-act="reclaim" data-s="${r.id}">Reclaim ${usd(r.reclaimable)}</button>`;
     } else {
       const mark = r.markPerContract ?? 0;
-      value = r.long ? usd(mark * r.long) : `${usd(-mark * r.short)}<div class="m">${usd(r.lockedCollateral, 0)} locked</div>`;
+      const net = mark * (r.long - r.short);
+      value = r.short ? `${usd(net)}<div class="m">${usd(r.lockedCollateral, 0)} locked</div>` : usd(net);
+      const both = Math.min(r.long, r.short);
+      if (both > 0) act = `<button class="pill small" type="button" data-act="close" data-s="${r.id}" data-q="${both}">Close ${both}, free ${usd(both * r.collateralPerContract)}</button>`;
     }
     const when = r.status === "settled" ? "Settled" : r.status === "settling" ? "Settling now" : r.status === "closed" ? "Closed, print due" : `Trading closes in ${countdown(r.tradingEnd)}`;
     return `<div class="pf-row"><div><div class="t">${esc(positionTitle(r))}</div><div class="m">${when}</div></div><div>${pos}</div><div class="v">${value}</div><div class="act">${act}</div></div>`;
@@ -700,7 +703,7 @@ async function refreshPortfolio() {
     <p class="status" id="pf-status"></p>
     ${p.rows.length || vaultRows ? `<div class="pf-row pf-head"><div>Market</div><div>Position</div><div class="v">Value</div><div class="act"></div></div>${rows}${vaultRows}` : '<p class="empty">No positions yet. Pick a market above.</p>'}`;
   $("#pf-faucet").addEventListener("click", faucet);
-  $$("[data-act]").forEach((b) => b.addEventListener("click", () => runAction(b.dataset.act, b.dataset.s, b)));
+  $$("[data-act]").forEach((b) => b.addEventListener("click", () => runAction(b.dataset.act, b.dataset.s, b, b.dataset.q)));
   $$("[data-vw]").forEach((b) => b.addEventListener("click", async () => {
     const st = $("#pf-status");
     b.disabled = true;
@@ -713,13 +716,13 @@ async function refreshPortfolio() {
   }));
 }
 
-async function runAction(type, series, btn) {
+async function runAction(type, series, btn, qty) {
   const st = $("#pf-status");
   btn.disabled = true;
   st.className = "status";
   st.textContent = S.wallet.kind === "burner" ? "Signing." : "Approve in your wallet.";
   try {
-    const prepared = await api("action", { type, series, owner: S.wallet.address });
+    const prepared = await api("action", { type, series, owner: S.wallet.address, qty: qty ? Number(qty) : undefined });
     const r = await signAndSubmit(prepared);
     st.innerHTML = r.url ? `Done. <a href="${esc(r.url)}" target="_blank" rel="noopener">View the transaction</a>` : "Done.";
     await refreshPortfolio();
