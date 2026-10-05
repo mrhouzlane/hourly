@@ -801,6 +801,56 @@
       ]
     },
     {
+      "name": "set_admin",
+      "docs": [
+        "Hands config authority to a new admin (e.g. the Squads multisig vault)."
+      ],
+      "discriminator": [
+        251,
+        163,
+        0,
+        52,
+        91,
+        194,
+        187,
+        92
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "new_admin",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
       "name": "set_fee",
       "discriminator": [
         18,

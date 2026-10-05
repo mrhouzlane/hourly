@@ -122,6 +122,13 @@ pub mod hourly {
         Ok(())
     }
 
+    /// Hands config authority to a new admin (e.g. the Squads multisig vault).
+    pub fn set_admin(ctx: Context<AdminOnly>, new_admin: Pubkey) -> Result<()> {
+        require_keys_neq!(new_admin, Pubkey::default(), HourlyError::BadTerms);
+        ctx.accounts.config.admin = new_admin;
+        Ok(())
+    }
+
     pub fn set_lister(ctx: Context<AdminOnly>, lister: Pubkey) -> Result<()> {
         ctx.accounts.config.lister = lister;
         Ok(())

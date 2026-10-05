@@ -759,3 +759,22 @@ fn fuzz_escrow_always_solvent_and_usdc_conserved() {
         assert_eq!(total0, total1, "seed {seed}: USDC created or destroyed");
     }
 }
+
+#[test]
+fn admin_can_hand_over_to_multisig_and_old_admin_loses_rights() {
+    let mut e = setup();
+    let multisig = Keypair::new();
+    e.svm.airdrop(&multisig.pubkey(), 1_000_000_000).unwrap();
+    let call = |e: &mut Env, who: &Keypair, ix_data: Vec<u8>| {
+        let ix = Instruction::new_with_bytes(hourly::id(), &ix_data,
+            hourly::accounts::AdminOnly { admin: who.pubkey(), config: e.config }.to_account_metas(None));
+        send(&mut e.svm, &[ix], who, &[who])
+    };
+    let admin = e.admin.insecure_clone();
+    call(&mut e, &admin, hourly::instruction::SetAdmin { new_admin: multisig.pubkey() }.data()).unwrap();
+    expect_code(call(&mut e, &admin, hourly::instruction::SetPaused { paused: true }.data()), "Custom(6010)");
+    call(&mut e, &multisig, hourly::instruction::SetPaused { paused: true }.data()).unwrap();
+    let c: Config = read(&e.svm, &e.config);
+    assert_eq!(c.admin, multisig.pubkey());
+    assert!(c.paused);
+}
