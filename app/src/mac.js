@@ -372,26 +372,29 @@ function optionsList() {
 function stepHtml() {
   const t = S.t, g = gpuLabel(t.gpu);
   if (t.step === 1) {
+    const ks = levelsFor(t.gpu), last = lastPrint(t.gpu) || 0;
+    const atm = ks.length ? ks.reduce((p, k) => (Math.abs(k - last) < Math.abs(p - last) ? k : p)) : null;
+    const m = atm !== null ? seriesNear(t.gpu, atm) : null;
     const sides = [
-      { key: "higher", glyph: "▲", t: "Higher", s: `${g} costs more` },
-      { key: "lower", glyph: "▼", t: "Lower", s: `${g} costs less` },
+      { key: "higher", glyph: "▲", t: "Higher", cls: "up" },
+      { key: "lower", glyph: "▼", t: "Lower", cls: "dn" },
     ];
-    return `<h2>${g}: higher or lower?</h2>
-      <div class="options">${sides.map((o, i) => `<button class="opt ${i === t.hl ? "hl" : ""}" data-opt="${o.key}"><span class="glyph">${o.glyph}</span><span><div class="t">${esc(o.t)}</div><div class="s">${o.s}</div></span><span></span></button>`).join("")}</div>`;
+    return `<h2>${g} tomorrow</h2><p class="lead small">${m ? `Around $${atm.toFixed(2)} an hour. Which way does it go?` : "Which way does it go?"}</p>
+      <div class="options pm">${sides.map((o, i) => `<button class="opt ${o.cls} ${i === t.hl ? "hl" : ""}" data-opt="${o.key}"><span class="glyph">${o.glyph}</span><span class="t">${o.t}</span><span class="r">${m ? cents(sideUnit(m, o.key)) : ""}</span></button>`).join("")}</div>`;
   }
+  const row = (i, label, m, k) => {
+    const ch = m ? sideChance(m, t.side) : 0;
+    return `<button class="opt row2 ${t.side === "higher" ? "up" : "dn"} ${i === t.hl ? "hl" : ""}" data-opt="${k}" style="--p:${Math.round(ch * 100)}%"><span class="t">${label}</span><span class="ch"><b>${pct(ch)}</b><small>${m ? cents(sideUnit(m, t.side)) : ""}</small></span></button>`;
+  };
   if (t.step === 2) {
     const ks = levelsFor(t.gpu);
-    return `<h2>Higher or lower than what price?</h2>
-      <div class="options">${ks.map((k, i) => {
-        const m = seriesNear(t.gpu, k);
-        const ch = m ? sideChance(m, t.side) : 0;
-        return `<button class="opt ${i === t.hl ? "hl" : ""}" data-opt="${k}"><span class="glyph">$</span><span><div class="t">${t.side === "higher" ? "Above" : "At or below"} $${k.toFixed(2)}</div><div class="s">${pct(ch)} chance</div></span><span class="r">${m ? cents(sideUnit(m, t.side)) : ""}<small>per $1</small></span></button>`;
-      }).join("")}</div>`;
+    return `<h2>${t.side === "higher" ? "Higher" : "Lower"} than what price?</h2><p class="lead small">Bigger number = more likely.</p>
+      <div class="options pm2">${ks.map((k, i) => row(i, `${t.side === "higher" ? "Above" : "At or below"} $${k.toFixed(2)}`, seriesNear(t.gpu, k), k)).join("")}</div>`;
   }
   if (t.step === 3) {
     const ms = datesFor(t.gpu, t.strike);
-    return `<h2>On which day?</h2>
-      <div class="options">${ms.map((m, i) => `<button class="opt ${i === t.hl ? "hl" : ""}" data-opt="${m.id}"><span class="glyph">◷</span><span><div class="t">${day(m.windowEnd)}</div><div class="s">${pct(sideChance(m, t.side))} chance</div></span><span class="r">${cents(sideUnit(m, t.side))}<small>per $1</small></span></button>`).join("")}</div>`;
+    return `<h2>On which day?</h2><p class="lead small">${g} ${t.side === "higher" ? "above" : "at or below"} $${t.strike.toFixed(2)}</p>
+      <div class="options pm2">${ms.map((m, i) => row(i, day(m.windowEnd), m, m.id)).join("")}</div>`;
   }
   const m = S.markets.find((x) => x.id === t.seriesId);
   if (!m) return "<p>That market just closed. Pick another date.</p>";
