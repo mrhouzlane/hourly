@@ -120,6 +120,43 @@ async function signAndSubmit(prepared) {
   } finally { document.body.classList.remove("busy"); }
 }
 
+// ---------- the mascot: blinks, breathes, and watches your cursor ----------
+const mascot = (cls = "") => `<svg class="mascot ${cls}" viewBox="0 0 120 130" aria-hidden="true">
+  <circle cx="60" cy="68" r="48" fill="#2f6bff"/>
+  <circle cx="60" cy="68" r="48" fill="none" stroke="#fff" stroke-opacity=".35" stroke-width="2"/>
+  <circle cx="60" cy="68" r="40" fill="none" stroke="#fff" stroke-width="3" stroke-dasharray="2.2 18.9" stroke-dashoffset="1.1" transform="rotate(-90 60 68)"/>
+  <g class="hand h"><line x1="60" y1="68" x2="60" y2="46" stroke="#fff" stroke-width="5" stroke-linecap="round"/></g>
+  <g class="hand m"><line x1="60" y1="68" x2="60" y2="36" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/></g>
+  <circle cx="60" cy="68" r="4.5" fill="#fff"/>
+  <g class="brows"><path d="M29,46 L52,41" stroke="#1f1e21" stroke-width="7.5" stroke-linecap="round"/><path d="M68,41 L91,46" stroke="#1f1e21" stroke-width="7.5" stroke-linecap="round"/></g>
+  <g class="glasses"><path d="M55,68 q5,-5 10,0" stroke="#1f1e21" stroke-width="4" fill="none" stroke-linecap="round"/>
+    <path d="M28,66 L19,61 M92,66 L101,61" stroke="#1f1e21" stroke-width="4" stroke-linecap="round"/>
+    <g class="eyes"><circle cx="42" cy="69" r="14" fill="#fff" stroke="#1f1e21" stroke-width="4.5"/><circle cx="78" cy="69" r="14" fill="#fff" stroke="#1f1e21" stroke-width="4.5"/>
+    <g class="pupil"><circle cx="42" cy="69" r="5.5" fill="#1f1e21"/><circle cx="78" cy="69" r="5.5" fill="#1f1e21"/><circle cx="44" cy="67" r="1.9" fill="#fff"/><circle cx="80" cy="67" r="1.9" fill="#fff"/></g></g></g>
+  <path class="mouth" d="M47,96 q13,11 26,0" stroke="#1f1e21" stroke-width="4" stroke-linecap="round" fill="none"/>
+  <path d="M54,100 q6,7 12,0" fill="#ff7a8a" opacity=".0"/></svg>`;
+function tickClocks() {
+  const d = new Date(), mm = d.getMinutes() * 6 + d.getSeconds() * 0.1, hh = (d.getHours() % 12) * 30 + d.getMinutes() * 0.5;
+  for (const m of document.querySelectorAll(".mascot")) { m.style.setProperty("--mm", mm.toFixed(1)); m.style.setProperty("--hh", hh.toFixed(1)); }
+}
+setInterval(tickClocks, 1000);
+document.addEventListener("pointermove", (e) => {
+  for (const m of document.querySelectorAll(".mascot")) {
+    const r = m.getBoundingClientRect(), dx = e.clientX - (r.left + r.width / 2), dy = e.clientY - (r.top + r.height / 2);
+    const d = Math.hypot(dx, dy) || 1, k = Math.min(3.2, d / 60);
+    m.style.setProperty("--dx", ((dx / d) * k).toFixed(2)); m.style.setProperty("--dy", ((dy / d) * k).toFixed(2));
+  }
+});
+// numbers glide to their new value
+function tween(el, to, fmt, ms = 520) {
+  if (!el) return;
+  const from = Number(el.dataset.v ?? to); el.dataset.v = to;
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches || from === to) { el.textContent = fmt(to); return; }
+  const t0 = performance.now();
+  const step = (now) => { const k = Math.min(1, (now - t0) / ms), e = 1 - Math.pow(1 - k, 4); el.textContent = fmt(from + (to - from) * e); if (k < 1) requestAnimationFrame(step); };
+  requestAnimationFrame(step);
+}
+
 // ---------- dialogs ----------
 function dialog(html, onMount) {
   const m = document.createElement("div");
@@ -180,7 +217,7 @@ function slidePill(box, key) {
 function renderMenu() {
   const g = S.index.find((x) => x.code === "H100_SXM");
   $("#menubar").innerHTML = `
-    <button data-view="about" title="About Hourly"><img class="logo" src="mark.svg" alt=""></button>
+    <button data-view="about" title="About Hourly">${mascot("nav")}</button>
     ${[["trade", "Trade"], ["chain", "Chain"], ["hedge", "Hedge"], ["earn", "Earn"], ["activity", "Activity"], ["portfolio", "Portfolio"]]
       .map(([k, t]) => `<button data-view="${k}" class="${S.view === k ? "on" : ""}">${t}</button>`).join("")}
     <span class="spacer"></span>
@@ -200,7 +237,7 @@ function renderMenu() {
 }
 
 function windowShell(title, body) {
-  return `<section class="window"><div class="titlebar"><span class="sq"><button class="closebox" aria-label="Close" data-home></button><i></i><i></i></span><span class="tt">HOURLY / ${esc(title).toUpperCase()}</span><span class="ar">↗</span></div>${body}</section>`;
+  return `<section class="window"><div class="titlebar"><span class="tt"><i class="dot"></i>HOURLY / ${esc(title).toUpperCase()}</span><span class="live"><i></i>LIVE</span></div>${body}</section>`;
 }
 
 // ---------- classic zoom rectangles (Finder open/close motion) ----------
@@ -221,6 +258,89 @@ function zoom(fromEl, toEl) {
     setTimeout(() => { r.style.opacity = "1"; }, i * 28);
     setTimeout(() => r.remove(), i * 28 + 90);
   }
+}
+
+// ---------- the assets: AI chips, drawn as chips ----------
+// Specs are the public vendor figures (architecture, memory); prices come live from the index.
+const CHIPS = {
+  H100_SXM: { maker: "NVIDIA", arch: "Hopper", mem: "80GB HBM3", tag: "The workhorse of the AI boom", uses: ["Training", "Inference"], hue: "#2f6bff", hbm: 3, dies: 1 },
+  H200: { maker: "NVIDIA", arch: "Hopper", mem: "141GB HBM3e", tag: "More memory for bigger models", uses: ["LLM serving", "Long context"], hue: "#27a8ff", hbm: 3, dies: 1 },
+  B200: { maker: "NVIDIA", arch: "Blackwell", mem: "192GB HBM3e", tag: "The new frontier-model chip", uses: ["Frontier training", "Reasoning"], hue: "#8a6bff", hbm: 4, dies: 2 },
+  A100_SXM4: { maker: "NVIDIA", arch: "Ampere", mem: "80GB HBM2e", tag: "The veteran, now the cheap tier", uses: ["Fine-tuning", "Batch jobs"], hue: "#7f95c9", hbm: 3, dies: 1 },
+};
+function chipArt(code, big) {
+  const c = CHIPS[code] || CHIPS.H100_SXM, id = `ca${code}${big ? "b" : ""}`;
+  const hb = (x, y) => `<rect x="${x}" y="${y}" width="14" height="9" rx="1.5" class="hbm"/>`;
+  let mem = "";
+  for (let i = 0; i < c.hbm; i++) { const y = 17 + i * (c.dies === 2 ? 14 : 15); mem += hb(14, y) + hb(92, y); }
+  const dies = c.dies === 2
+    ? `<rect x="33" y="24" width="25" height="42" rx="3" class="die"/><rect x="62" y="24" width="25" height="42" rx="3" class="die"/><rect x="56" y="38" width="8" height="14" class="link"/>`
+    : `<rect x="36" y="22" width="48" height="46" rx="4" class="die"/>`;
+  return `<svg viewBox="0 0 120 90" class="chipart" style="--h:${c.hue}" aria-hidden="true">
+    <defs><linearGradient id="${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${c.hue}" stop-opacity=".95"/><stop offset="1" stop-color="#0a1250"/></linearGradient>
+    <pattern id="${id}p" width="6" height="6" patternUnits="userSpaceOnUse"><path d="M0 0H6M0 0V6" stroke="#fff" stroke-opacity=".25" stroke-width=".5"/></pattern></defs>
+    <rect x="6" y="6" width="108" height="78" rx="8" class="pkg"/>
+    ${mem}${dies.replace(/class="die"/g, `class="die" fill="url(#${id})"`)}
+    <rect x="36" y="22" width="48" height="46" rx="4" fill="url(#${id}p)" opacity=".6" ${c.dies === 2 ? 'style="display:none"' : ""}/>
+    <g class="pins">${Array.from({ length: 14 }, (_, i) => `<rect x="${12 + i * 7.4}" y="2" width="3" height="5"/><rect x="${12 + i * 7.4}" y="83" width="3" height="5"/>`).join("")}</g>
+  </svg>`;
+}
+const spark = (h) => {
+  const v = h.slice(-30).map((p) => p[1]), lo = Math.min(...v), hi = Math.max(...v) || 1, w = 100, ht = 26;
+  const pts = v.map((x, i) => `${((i / (v.length - 1)) * w).toFixed(1)},${(ht - 2 - ((x - lo) / (hi - lo || 1)) * (ht - 4)).toFixed(1)}`);
+  return `<svg viewBox="0 0 ${w} ${ht}" class="spark" preserveAspectRatio="none"><polyline points="${pts.join(" ")}" /></svg>`;
+};
+function marqueeHtml() {
+  const item = (g) => `<span class="mq">${chipArt(g.code).replace('class="chipart"', 'class="chipart mini"')}<b>${esc(g.label)}</b><i>$${g.last.toFixed(2)}<small>/hr</small></i><em class="${g.chg7 >= 0 ? "up" : "dn"}">${g.chg7 >= 0 ? "▲" : "▼"} ${(Math.abs(g.chg7) * 100).toFixed(1)}%</em></span>`;
+  const row = GPU_ORDER.map((c) => S.index.find((x) => x.code === c)).filter(Boolean).map(item).join("");
+  return `<div class="marquee" aria-label="Live chip rental prices"><div class="mqtrack">${row}${row}${row}${row}</div></div>`;
+}
+function assetsHtml() {
+  const cards = GPU_ORDER.map((c) => S.index.find((x) => x.code === c)).filter(Boolean).map((g) => {
+    const k = CHIPS[g.code] || {};
+    const on = S.t.gpu === g.code;
+    return `<button class="asset ${on ? "on" : ""}" data-asset="${g.code}" style="--h:${k.hue || "#2f6bff"}">
+      <div class="art">${chipArt(g.code, true)}<span class="arch">${esc(k.arch || "")}</span></div>
+      <div class="ah"><b>${esc(g.label)}</b><span>${esc(k.maker || "")} · ${esc(k.mem || "")}</span></div>
+      <p>${esc(k.tag || "")}</p>
+      <div class="tags">${(k.uses || []).map((u) => `<i>${esc(u)}</i>`).join("")}</div>
+      <div class="ap"><span class="pr">$${g.last.toFixed(2)}<small>/hr</small></span><em class="${g.chg7 >= 0 ? "up" : "dn"}">${g.chg7 >= 0 ? "▲" : "▼"} ${(Math.abs(g.chg7) * 100).toFixed(1)}% 7d</em></div>
+      ${spark(g.history)}
+      <span class="go">Trade ${esc(g.label)} <i>→</i></span></button>`;
+  }).join("");
+  return `<section class="assets"><div class="sech"><div class="eyebrow">01 / THE ASSETS</div><h2 class="big">Four chips. One hourly price each.</h2></div><div class="agrid">${cards}</div></section>`;
+}
+function explainHtml() {
+  const g = S.index.find((x) => x.code === "H100_SXM");
+  const open = S.markets.filter((m) => m.status === "open").length;
+  const ic = {
+    chip: '<rect x="8" y="8" width="24" height="24" rx="4"/><path d="M14 4v4M20 4v4M26 4v4M14 32v4M20 32v4M26 32v4M4 14h4M4 20h4M4 26h4M32 14h4M32 20h4M32 26h4"/><rect x="15" y="15" width="10" height="10" rx="2"/>',
+    index: '<path d="M6 32V20M14 32V12M22 32V22M30 32V6M36 32H4"/>',
+    eye: '<path d="M3 20s6-11 17-11 17 11 17 11-6 11-17 11S3 20 3 20z"/><circle cx="20" cy="20" r="5"/>',
+    lock: '<rect x="8" y="17" width="24" height="17" rx="3"/><path d="M13 17v-5a7 7 0 0 1 14 0v5"/><circle cx="20" cy="26" r="2"/>',
+  };
+  const nodes = [
+    ["chip", "GPU-hour", "The price to rent one AI chip for one hour. It moves every day with demand for training and inference.", "RENT PRICE"],
+    ["index", "OCPI", "Ornn's Compute Price Index. One print a day per chip, the number every contract here settles on.", "DAILY PRINT"],
+    ["eye", "Oracle-settled", "A Switchboard oracle averages the print and signs it. The Solana program checks the signatures before paying.", "SIGNED ON-CHAIN"],
+    ["lock", "Fully backed", "Every contract is locked in USDC when it is sold. The most you can lose is what you put in.", "USDC ESCROW"],
+  ];
+  const lines = [
+    `index.read     H100_SXM  ->  ${g ? "$" + g.last.toFixed(2) : "..."} / GPU-hour`,
+    `markets.open   ${open} contracts, all fully collateralized`,
+    "oracle.settle  switchboard mean(print)  ->  signatures verified on-chain",
+    "escrow.payout  winners claim USDC from the locked escrow",
+  ];
+  return `<section class="explain"><div class="sech"><div class="eyebrow"><i class="pulse"></i>02 / HOW IT WORKS</div><h2 class="big">From a rented chip<br>to a settled contract.</h2></div>
+    <div class="flow">
+      <div class="rail"><i></i><b class="pk p1"></b><b class="pk p2"></b><b class="pk p3"></b></div>
+      <div class="fnodes">${nodes.map(([i, k, v, tag], n) => `<div class="fnode" style="--i:${n}">
+        <div class="orb"><svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ic[i]}</svg></div>
+        <span class="step">0${n + 1} / ${tag}</span><b>${k}</b><p>${v}</p></div>`).join("")}</div>
+    </div>
+    <div class="term"><div class="tbar"><i></i><i></i><i></i><span>hourly.settlement.log</span><em>● live</em></div>
+      <pre>${lines.map((l, n) => `<span class="tl" style="--d:${n * 0.9}s"><u>&gt;</u> ${esc(l)}</span>`).join("")}<span class="caret"></span></pre></div>
+  </section>`;
 }
 
 // ---------- trade wizard ----------
@@ -253,6 +373,7 @@ function tradeView() {
       <div class="panel"><div id="step" class="enter ${t.dir === "back" ? "back" : ""}">${stepHtml()}</div></div>
       <div class="chartpane">
         <div class="quote"><span>${esc(gpuLabel(t.gpu))} rental, per hour</span><span class="px">${lastPrint(t.gpu) ? `$${lastPrint(t.gpu).toFixed(2)}` : ""}</span></div>
+        <div class="rng">${[[7, "1W"], [30, "1M"], [90, "3M"]].map(([n, l]) => `<button data-rng="${n}" class="${(t.range || 30) === n ? "on" : ""}">${l}</button>`).join("")}</div>
         <div class="chart" id="chart">${chartSvg()}</div>
         <div class="small muted">${chartCaption()}</div>
       </div>
@@ -299,15 +420,23 @@ function stepHtml() {
   const qty = Math.max(0, Math.floor(t.amount / (unit * (t.side === "higher" ? 1.01 : 1))));
   const verb = t.side === "higher" ? "above" : "at or below";
   if (t.step === 4) {
+    const ch = sideChance(m, t.side);
+    const R = 38, C = 2 * Math.PI * R;
     return `<h2>How much?</h2><p class="lead small">${g} ${verb} $${m.strike.toFixed(2)} on ${day(m.windowEnd)}, at ${cents(unit)} per $1.</p>
-      <div class="amount">$<input id="amt" inputmode="decimal" value="${t.amount}" aria-label="Amount in USDC"></div>
-      <div class="chips">${[5, 20, 50, 100].map((v) => `<button class="btn" data-amt="${v}">$${v}</button>`).join("")}</div>
-      <div class="lines">
-        <div><span>Contracts</span><span id="qty">${qty}</span></div>
-        <div class="big"><span>You get if right</span><span id="win">${usd(qty)}</span></div>
-        <div><span>Chance, by the venue's model</span><span>${pct(sideChance(m, t.side))}</span></div>
+      <div class="amtcard">
+        <div class="cap">YOU PUT IN</div>
+        <div class="amount"><span>$</span><input id="amt" inputmode="decimal" value="${t.amount}" aria-label="Amount in USDC"></div>
+        <input type="range" class="slider" id="sl" min="1" max="250" step="1" value="${Math.min(250, Math.max(1, t.amount))}" aria-label="Amount slider">
+        <div class="chips">${[5, 20, 50, 100].map((v) => `<button class="pillchip ${t.amount === v ? "on" : ""}" data-amt="${v}">$${v}</button>`).join("")}</div>
       </div>
-      <div class="row" style="margin-top:16px"><button class="btn default" id="to-review" ${qty > 0 ? "" : "disabled"}>Review</button></div>`;
+      <div class="ticket">
+        <div class="tk win"><div class="cap">IF YOU'RE RIGHT YOU GET</div><div class="winnum" id="win" data-v="${qty}">${usd(qty)}</div><div class="mult" id="mult"></div></div>
+        <div class="tk gauge"><svg viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="${R}" class="gt"/><circle cx="50" cy="50" r="${R}" class="gv" id="gv" stroke-dasharray="${C.toFixed(1)}" stroke-dashoffset="${C.toFixed(1)}" data-c="${C.toFixed(1)}" data-p="${ch}"/></svg><div class="gn"><b>${pct(ch)}</b><span>CHANCE</span></div></div>
+        <div class="tk small2"><div class="cap">CONTRACTS</div><b id="qty" data-v="${qty}">${qty}</b></div>
+        <div class="tk small2"><div class="cap">AT RISK</div><b id="risk" data-v="0">$0.00</b></div>
+        <div class="tk race"><div class="rt"><span>RISK</span><span>REWARD</span></div><div class="rbar"><i id="rr"></i></div></div>
+      </div>
+      <button class="cta" id="to-review" ${qty > 0 ? "" : "disabled"}><span>Review</span><i>→</i></button>`;
   }
   // step 5: review
   const q = t.quote;
@@ -331,58 +460,91 @@ function chartCaption() {
   return "The dotted line is your date. The bracket is the model's 80% range for that day.";
 }
 
+let CH = null; // geometry for the crosshair
+const smooth = (pts) => pts.map((p, i) => {
+  if (!i) return `M${p[0].toFixed(1)},${p[1].toFixed(1)}`;
+  const a = pts[i - 2] || pts[i - 1], b = pts[i - 1], c = p, d = pts[i + 1] || c;
+  const c1 = [b[0] + (c[0] - a[0]) / 6, b[1] + (c[1] - a[1]) / 6], c2 = [c[0] - (d[0] - b[0]) / 6, c[1] - (d[1] - b[1]) / 6];
+  return `C${c1[0].toFixed(1)},${c1[1].toFixed(1)} ${c2[0].toFixed(1)},${c2[1].toFixed(1)} ${c[0].toFixed(1)},${c[1].toFixed(1)}`;
+}).join(" ");
 function chartSvg() {
   const t = S.t;
   const g = S.index.find((x) => x.code === t.gpu);
   if (!g) return "";
-  const hist = g.history.slice(-30);
+  const hist = g.history.slice(-(t.range || 30));
   const m = t.seriesId ? S.markets.find((x) => x.id === t.seriesId) : null;
   const dateM = m || (t.step === 3 && datesFor(t.gpu, t.strike)[t.hl]) || null;
-  const W = 600, H = 300, L = 8, R = 70, T = 14, B = 26;
+  const W = 560, H = 300, L = 10, R = 64, T = 16, B = 28;
   const t0 = Date.parse(`${hist[0][0]}T00:00:00Z`);
   const lastT = Date.parse(`${hist[hist.length - 1][0]}T00:00:00Z`);
-  const endT = dateM ? Date.parse(`${dateM.windowEnd}T00:00:00Z`) : lastT + 7 * 86400e3;
+  const endT = dateM ? Date.parse(`${dateM.windowEnd}T00:00:00Z`) : lastT + Math.max(3, hist.length * 0.18) * 86400e3;
   const vals = hist.map((p) => p[1]);
-  // on the level step the chart previews the highlighted row before you pick it
   const lv = t.strike !== null ? t.strike : (t.step === 2 && t.side ? (levelsFor(t.gpu)[t.hl] ?? null) : null);
   if (lv !== null) vals.push(lv);
   if (dateM && dateM.model) vals.push(dateM.model.settleP10, dateM.model.settleP90);
   let lo = Math.min(...vals), hi = Math.max(...vals);
-  const pad = (hi - lo) * 0.12 || 0.1; lo -= pad; hi += pad;
+  const pad = (hi - lo) * 0.14 || 0.1; lo -= pad; hi += pad;
   const X = (ms) => L + ((ms - t0) / (endT - t0)) * (W - L - R);
   const Y = (v) => T + (1 - (v - lo) / (hi - lo)) * (H - T - B);
   const pts = hist.map((p) => [X(Date.parse(`${p[0]}T00:00:00Z`)), Y(p[1])]);
-  const path = pts.map((p, i) => `${i ? "L" : "M"}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ");
-  const len = pts.reduce((a, p, i) => a + (i ? Math.hypot(p[0] - pts[i - 1][0], p[1] - pts[i - 1][1]) : 0), 0);
-  let extra = "";
+  const line = smooth(pts), lp = pts[pts.length - 1], base = H - B;
+  const area = `${line} L${lp[0].toFixed(1)},${base} L${pts[0][0].toFixed(1)},${base} Z`;
+  CH = { pts, hist, W, H };
+  let zone = "", fan = "", lvl = "", grid = "";
+  for (let i = 0; i <= 4; i++) { const v = lo + ((hi - lo) * i) / 4, y = Y(v); grid += `<line x1="${L}" x2="${W - R}" y1="${y}" y2="${y}" class="gl"/><text x="${W - R + 8}" y="${y + 3}" class="ax">$${v.toFixed(2)}</text>`; }
   if (lv !== null && t.side) {
-    const yl = Y(lv);
-    const winTop = t.side === "higher" ? T : yl, winH = t.side === "higher" ? yl - T : H - B - yl;
-    extra += `<rect x="${L}" y="${winTop}" width="${W - L - R}" height="${Math.max(0, winH)}" fill="url(#dith)" opacity="0.55"/>`;
-    extra += `<line x1="${L}" x2="${W - R}" y1="${yl}" y2="${yl}" stroke="#2f6bff" stroke-width="2" stroke-dasharray="6 4"/>`;
-    extra += `<text x="${W - R + 6}" y="${yl + 4}">$${lv.toFixed(2)}</text>`;
+    const yl = Y(lv), up = t.side === "higher";
+    zone = `<rect class="zone" x="${L}" y="${up ? T : yl}" width="${W - L - R}" height="${Math.max(0, up ? yl - T : base - yl)}" fill="url(#${up ? "zu" : "zd"})"/>`;
+    lvl = `<line class="lvl" x1="${L}" x2="${W - R}" y1="${yl}" y2="${yl}"/><rect x="${W - R + 2}" y="${yl - 9}" width="58" height="18" class="lvlbox"/><text x="${W - R + 31}" y="${yl + 4}" text-anchor="middle" class="lvltx">$${lv.toFixed(2)}</text>`;
   }
+  let xd = null;
   if (dateM) {
-    const xd = X(Date.parse(`${dateM.windowEnd}T00:00:00Z`));
-    extra += `<line x1="${xd}" x2="${xd}" y1="${T}" y2="${H - B}" stroke="#dbe6ff" stroke-dasharray="1 3"/>`;
-    extra += `<text x="${xd}" y="${H - 8}" text-anchor="end">${day(dateM.windowEnd)}</text>`;
+    xd = X(Date.parse(`${dateM.windowEnd}T00:00:00Z`));
     if (dateM.model) {
-      const a = Y(dateM.model.settleP90), b = Y(dateM.model.settleP10);
-      extra += `<path d="M${xd - 8},${a} H${xd} V${b} H${xd - 8}" fill="none" stroke="#dbe6ff" stroke-width="2"/>`;
+      const a = Y(dateM.model.settleP90), b = Y(dateM.model.settleP10), c = Y(dateM.model.settleP50);
+      const steps = 8, up = [], dn = [];
+      for (let i = 0; i <= steps; i++) { const f = i / steps, r = Math.sqrt(f), x = lp[0] + (xd - lp[0]) * f; up.push([x, lp[1] + (a - lp[1]) * r]); dn.push([x, lp[1] + (b - lp[1]) * r]); }
+      const fp = `M${up.map((q) => q.map((n) => n.toFixed(1)).join(",")).join(" L")} L${dn.reverse().map((q) => q.map((n) => n.toFixed(1)).join(",")).join(" L")} Z`;
+      fan = `<g class="fan"><path d="${fp}" fill="url(#fg)"/><path d="M${lp[0].toFixed(1)},${lp[1].toFixed(1)} L${xd.toFixed(1)},${c.toFixed(1)}" class="mid"/><circle cx="${xd.toFixed(1)}" cy="${c.toFixed(1)}" r="4" class="pin"/></g>`;
     }
+    fan += `<line x1="${xd}" x2="${xd}" y1="${T}" y2="${base}" class="dl"/><text x="${xd}" y="${H - 8}" text-anchor="end" class="ax">${day(dateM.windowEnd)}</text>`;
   }
-  const lp = pts[pts.length - 1];
-  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Recent prints with your level and date">
-    <defs><pattern id="dith" width="2" height="2" patternUnits="userSpaceOnUse"><rect width="1" height="1" fill="#2f6bff"/><rect x="1" y="1" width="1" height="1" fill="#2f6bff"/></pattern></defs>
-    ${extra}
-    <path d="${path}" fill="none" stroke="#dbe6ff" stroke-width="2.5" stroke-dasharray="${len}" stroke-dashoffset="${len}" style="animation: draw .9s cubic-bezier(.22,1,.36,1) forwards"/>
-    <rect class="live" x="${lp[0] - 3}" y="${lp[1] - 3}" width="6" height="6" fill="#6fa0ff"/>
-    <text x="${L}" y="${H - 8}">${day(hist[0][0])}</text>
-    <style>@keyframes draw{to{stroke-dashoffset:0}}</style>
-  </svg>`;
+  const first = hist[0][0].slice(5);
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Recent prints with your level and date">
+    <defs>
+      <linearGradient id="ag" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#6fa0ff" stop-opacity=".45"/><stop offset="1" stop-color="#6fa0ff" stop-opacity="0"/></linearGradient>
+      <linearGradient id="zu" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2f6bff" stop-opacity=".02"/><stop offset="1" stop-color="#2f6bff" stop-opacity=".5"/></linearGradient>
+      <linearGradient id="zd" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="#2f6bff" stop-opacity=".02"/><stop offset="1" stop-color="#2f6bff" stop-opacity=".5"/></linearGradient>
+      <linearGradient id="fg" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#9fc0ff" stop-opacity=".05"/><stop offset="1" stop-color="#9fc0ff" stop-opacity=".4"/></linearGradient>
+      <clipPath id="cl"><rect x="0" y="0" width="${W}" height="${H}"/></clipPath>
+    </defs>
+    ${grid}${zone}
+    <path d="${area}" fill="url(#ag)" class="area"/>
+    ${fan}${lvl}
+    <path d="${line}" class="ln" pathLength="1"/>
+    <circle cx="${lp[0].toFixed(1)}" cy="${lp[1].toFixed(1)}" r="9" class="halo"/><circle cx="${lp[0].toFixed(1)}" cy="${lp[1].toFixed(1)}" r="4" class="live"/>
+    <text x="${L}" y="${H - 8}" class="ax">${first}</text>
+    <line class="xh" x1="0" x2="0" y1="${T}" y2="${base}"/><circle class="xd" r="4.5" cx="-10" cy="-10"/>
+  </svg><div class="tip" hidden></div>`;
+}
+function bindChart() {
+  const box = $("#chart");
+  if (!box || !CH) return;
+  box.onpointermove = (e) => {
+    const svg = $("svg", box); if (!svg) return;
+    const r = svg.getBoundingClientRect(), x = ((e.clientX - r.left) / r.width) * CH.W;
+    let best = 0; CH.pts.forEach((p, i) => { if (Math.abs(p[0] - x) < Math.abs(CH.pts[best][0] - x)) best = i; });
+    const p = CH.pts[best], h = CH.hist[best];
+    const xh = $(".xh", svg), xd = $(".xd", svg), tip = $(".tip", box);
+    xh.setAttribute("x1", p[0]); xh.setAttribute("x2", p[0]); xh.style.opacity = 1;
+    xd.setAttribute("cx", p[0]); xd.setAttribute("cy", p[1]); xd.style.opacity = 1;
+    tip.hidden = false; tip.innerHTML = `<span>${day(h[0])}</span><b>$${h[1].toFixed(2)}</b>`;
+    tip.style.left = `${Math.min(80, Math.max(20, (p[0] / CH.W) * 100))}%`; tip.style.top = `${(p[1] / CH.H) * 100}%`;
+  };
+  box.onpointerleave = () => { const svg = $("svg", box); if (!svg) return; $(".xh", svg).style.opacity = 0; $(".xd", svg).style.opacity = 0; $(".tip", box).hidden = true; };
 }
 
-function refreshChart() { const c = $("#chart"); if (c) c.innerHTML = chartSvg(); }
+function refreshChart() { const c = $("#chart"); if (c) { c.innerHTML = chartSvg(); bindChart(); } }
 
 function goStep(k, fromEl) {
   const t = S.t;
@@ -403,6 +565,8 @@ function pick(key, el) {
 }
 
 function bindTrade() {
+  bindChart();
+  $$("[data-rng]").forEach((b) => b.addEventListener("click", () => { S.t.range = Number(b.dataset.rng); $$("[data-rng]").forEach((x) => x.classList.toggle("on", x === b)); refreshChart(); }));
   $$("[data-step]").forEach((b) => b.addEventListener("click", () => goStep(Number(b.dataset.step), b)));
   $$("[data-gpu]").forEach((b) => b.addEventListener("click", () => { S.t.gpu = b.dataset.gpu; S.t.strike = null; S.t.seriesId = null; render(); }));
   $$("[data-opt]").forEach((b, i) => {
@@ -423,17 +587,29 @@ function previewHover() {
 function bindAmount() {
   const input = $("#amt");
   if (!input) return;
-  const update = () => {
+  const update = (src) => {
     S.t.amount = Math.max(0, Number(input.value) || 0);
     const m = S.markets.find((x) => x.id === S.t.seriesId);
     if (!m) return;
-    const qty = Math.max(0, Math.floor(S.t.amount / (sideUnit(m, S.t.side) * (S.t.side === "higher" ? 1.01 : 1))));
-    $("#qty").textContent = qty; $("#win").textContent = usd(qty);
+    const unit = sideUnit(m, S.t.side), fee = S.t.side === "higher" ? 1.01 : 1;
+    const qty = Math.max(0, Math.floor(S.t.amount / (unit * fee)));
+    const risk = qty * unit * fee;
+    tween($("#win"), qty, usd); tween($("#qty"), qty, (v) => String(Math.round(v))); tween($("#risk"), risk, usd);
+    $("#mult").textContent = risk > 0 ? `${(qty / risk).toFixed(1)}x your money` : "";
+    $("#rr").style.width = `${qty > 0 ? Math.max(4, Math.min(100, (risk / qty) * 100)) : 0}%`;
     $("#to-review").disabled = qty <= 0;
+    if (src !== "sl") $("#sl").value = Math.min(250, Math.max(1, S.t.amount));
+    $("#sl").style.setProperty("--f", `${(Math.min(250, Math.max(1, S.t.amount)) / 250) * 100}%`);
+    $$("[data-amt]").forEach((b) => b.classList.toggle("on", Number(b.dataset.amt) === S.t.amount));
   };
-  input.addEventListener("input", update);
+  input.addEventListener("input", () => update("in"));
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter" && !$("#to-review").disabled) { e.preventDefault(); $("#to-review").click(); } });
+  $("#sl").addEventListener("input", (e) => { input.value = e.target.value; update("sl"); });
   $$("[data-amt]").forEach((b) => b.addEventListener("click", () => { input.value = b.dataset.amt; update(); }));
   $("#to-review").addEventListener("click", (e) => ensureWallet(() => goStep(5, e.target)));
+  const gv = $("#gv"); requestAnimationFrame(() => requestAnimationFrame(() => { gv.style.strokeDashoffset = Number(gv.dataset.c) * (1 - Number(gv.dataset.p)); }));
+  $("#win").dataset.v = 0; $("#qty").dataset.v = 0; $("#risk").dataset.v = 0;
+  update();
   input.focus(); input.select();
 }
 
@@ -826,22 +1002,34 @@ function aboutBox() {
 
 // ---------- render ----------
 function heroHtml() {
-  const g = S.index.find((x) => x.code === "H100_SXM");
+  const gs = GPU_ORDER.map((c) => S.index.find((x) => x.code === c)).filter(Boolean);
+  const top = gs.slice().sort((a, b) => Math.abs(b.chg7) - Math.abs(a.chg7))[0];
+  const open = S.markets.filter((m) => m.status === "open").length;
   const bt = S.status && S.status.backtest && S.status.backtest.result ? S.status.backtest.result.find((r) => r.horizonDays === 7) : null;
   return `<header class="hero">
-    <div class="eyebrow"><i class="pulse"></i>AI COMPUTE / DEFINED OUTCOMES</div>
-    <div class="herorow">
-      <h1>The price of a chip.<br>Your call.</h1>
-      <div class="aside">Bet on what an hour of AI compute will cost, or lock in your own bill. Fully funded, settled by oracle on Solana.
-        <div class="chiprow">${g ? `<span>H100 <b>$${g.last.toFixed(2)}</b>/hr</span>` : ""}${bt ? `<span>MODEL <b>${Math.round(bt.coverage * 100)}%</b> IN RANGE</span>` : ""}</div></div>
-    </div></header>`;
+    <div class="heromark">${mascot("big")}<span class="bubble">Time is money.<br>Compute is both.</span></div>
+    <div class="eyebrow"><i class="pulse"></i>THE COMPUTE EXCHANGE / AI CHIPS, PRICED BY THE HOUR</div>
+    <h1>Trade the price<br>of <span class="grad">AI compute.</span></h1>
+    <p class="sub">Every model runs on rented GPUs, and the rent changes every day. Take a view on where it goes, or lock in your bill. Fully backed in USDC, settled by oracle on Solana.</p>
+    <div class="kpis">
+      <div><b>${gs.length}</b><span>AI chips listed</span></div>
+      <div><b>${open}</b><span>open markets</span></div>
+      ${top ? `<div><b class="${top.chg7 >= 0 ? "up" : "dn"}">${top.chg7 >= 0 ? "+" : "-"}${(Math.abs(top.chg7) * 100).toFixed(1)}%</b><span>${esc(top.label)}, biggest 7d move</span></div>` : ""}
+      ${bt ? `<div><b>${Math.round(bt.coverage * 100)}%</b><span>of prints inside our range</span></div>` : ""}
+    </div>
+  </header>${gs.length ? marqueeHtml() : ""}${gs.length ? assetsHtml() : ""}`;
 }
 function render() {
   const views = { trade: tradeView, chain: chainView, hedge: hedgeView, earn: earnView, activity: activityView, portfolio: portfolioView };
-  $("#desk").innerHTML = (S.view === "trade" ? heroHtml() : "") + views[S.view]();
+  $("#desk").innerHTML = (S.view === "trade" ? heroHtml() : "") + views[S.view]() + (S.view === "trade" ? explainHtml() : "");
   $$("[data-home]").forEach((b) => b.addEventListener("click", () => { S.view = "trade"; renderMenu(); render(); }));
   ({ trade: bindTrade, chain: bindChain, hedge: bindHedge, earn: bindEarn, activity: bindActivity, portfolio: bindPortfolio })[S.view]();
   slidePill($(".steps"), "steps");
+  $$("[data-asset]").forEach((b) => b.addEventListener("click", () => {
+    S.t = { ...S.t, gpu: b.dataset.asset, step: 1, side: null, strike: null, seriesId: null, quote: null, hl: 0, dir: "back" };
+    render(); const w = $(".window"); if (w) w.scrollIntoView({ behavior: "smooth", block: "start" });
+  }));
+  tickClocks();
 }
 
 async function refreshMarkets() {
