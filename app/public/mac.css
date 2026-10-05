@@ -1001,3 +1001,4 @@ button.lrow:hover { background: #f1f5ff; transform: translateX(-2px); }
   .asset .ap .pr small { font-size: 10px; }
   .hero .sub { max-width: none; margin-top: -12px; }
 }
+@media (min-width: 1000px) and (min-height: 620px) { .asset .ap .pr small { display: none; } .asset .ap .pr { font-size: 17px; } .asset .ap em { font-size: 10.5px; } .asset { padding: 8px 10px; column-gap: 10px; grid-template-columns: 50px 1fr; } .asset .art { height: 42px; } }
