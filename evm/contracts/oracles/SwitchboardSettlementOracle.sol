@@ -15,6 +15,14 @@ interface ISwitchboardOnDemand {
     function getLatestValue(bytes32 feedId) external view returns (int128 value, uint256 timestamp, uint64 slotNumber);
 }
 
+/// @dev Liveness dependency (checked live 2026-10-05, see evm/SWITCHBOARD_EVM.md):
+/// the v2.0.0 verifier accepts a signature only if the recovered oracle key was
+/// registered on its SwitchboardQueue within `maxAge` (30 days). Registration is
+/// admin-only (`setOracleKeys`). On Monad mainnet, Monad testnet and HyperEVM the
+/// keys crossbar signs with are registered but expired, so `updateFeeds` reverts
+/// "No valid signatures" and this adapter reverts `OracleVerify` until Switchboard
+/// refreshes them. test/SwitchboardFork.t.sol proves the same genuine bytes settle
+/// once the keys are refreshed. Series then settle via the 72 h backup settler.
 /// @title Switchboard settlement adapter for Hourly.
 /// @notice Submits a crossbar-encoded update to the Switchboard contract (which
 /// checks the oracle ECDSA signatures against its registered oracle keys), then
