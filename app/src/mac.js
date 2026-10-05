@@ -217,8 +217,8 @@ function slidePill(box, key) {
 function renderMenu() {
   const g = S.index.find((x) => x.code === "H100_SXM");
   $("#menubar").innerHTML = `
-    <button data-view="about" title="About Hourly">${mascot("nav")}</button>
-    ${[["trade", "Trade"], ["chain", "Chain"], ["hedge", "Hedge"], ["earn", "Earn"], ["activity", "Activity"], ["portfolio", "Portfolio"]]
+    <button data-view="about" class="brand" title="About Hourly">Hourly</button>
+    ${[["trade", "Trade"], ["hedge", "Protect"], ["earn", "Earn"], ["activity", "Activity"], ["portfolio", "Portfolio"]]
       .map(([k, t]) => `<button data-view="${k}" class="${S.view === k ? "on" : ""}">${t}</button>`).join("")}
     <span class="spacer"></span>
     <button id="wallet-btn">${S.wallet ? `${S.wallet.address.slice(0, 4)}…${S.wallet.address.slice(-4)}` : "Connect"}</button>`;
@@ -341,7 +341,7 @@ function seriesNear(gpu, strike) {
   // the soonest market at this level, used for the chance shown on the level step
   return datesFor(gpu, strike)[0] || null;
 }
-const STEP_NAMES = ["Side", "Level", "Date", "Amount", "Review"];
+const STEP_NAMES = ["Pick", "Price", "Day", "Amount", "Confirm"];
 
 function tradeView() {
   const t = S.t;
@@ -360,7 +360,7 @@ function tradeView() {
         <div class="chart" id="chart">${chartSvg()}</div>
       </div>
     </div>
-    <div class="hint"><span>Settled by oracle on Ornn's 4pm New York print</span></div>`);
+    <div class="hint"><span><a href="#" id="to-chain">Pro view: option chain</a></span></div>`);
 }
 
 function optionsList() {
@@ -375,15 +375,15 @@ function stepHtml() {
   const t = S.t, g = gpuLabel(t.gpu);
   if (t.step === 1) {
     const sides = [
-      { key: "higher", glyph: "▲", t: `${g} rents higher`, s: "" },
-      { key: "lower", glyph: "▼", t: `${g} rents lower`, s: "" },
+      { key: "higher", glyph: "▲", t: "Higher", s: `${g} costs more` },
+      { key: "lower", glyph: "▼", t: "Lower", s: `${g} costs less` },
     ];
-    return `<h2>Pick your side</h2>
+    return `<h2>${g}: higher or lower?</h2>
       <div class="options">${sides.map((o, i) => `<button class="opt ${i === t.hl ? "hl" : ""}" data-opt="${o.key}"><span class="glyph">${o.glyph}</span><span><div class="t">${esc(o.t)}</div><div class="s">${o.s}</div></span><span></span></button>`).join("")}</div>`;
   }
   if (t.step === 2) {
     const ks = levelsFor(t.gpu);
-    return `<h2>Pick your level</h2>
+    return `<h2>Higher or lower than what price?</h2>
       <div class="options">${ks.map((k, i) => {
         const m = seriesNear(t.gpu, k);
         const ch = m ? sideChance(m, t.side) : 0;
@@ -392,7 +392,7 @@ function stepHtml() {
   }
   if (t.step === 3) {
     const ms = datesFor(t.gpu, t.strike);
-    return `<h2>Pick your date</h2>
+    return `<h2>On which day?</h2>
       <div class="options">${ms.map((m, i) => `<button class="opt ${i === t.hl ? "hl" : ""}" data-opt="${m.id}"><span class="glyph">◷</span><span><div class="t">${day(m.windowEnd)}</div><div class="s">${pct(sideChance(m, t.side))} chance</div></span><span class="r">${cents(sideUnit(m, t.side))}<small>per $1</small></span></button>`).join("")}</div>`;
   }
   const m = S.markets.find((x) => x.id === t.seriesId);
@@ -537,6 +537,7 @@ function pick(key, el) {
 }
 
 function bindTrade() {
+  const tc = $("#to-chain"); if (tc) tc.addEventListener("click", (e) => { e.preventDefault(); S.view = "chain"; renderMenu(); render(); });
   bindChart();
   $$("[data-rng]").forEach((b) => b.addEventListener("click", () => { S.t.range = Number(b.dataset.rng); $$("[data-rng]").forEach((x) => x.classList.toggle("on", x === b)); refreshChart(); }));
   $$("[data-step]").forEach((b) => b.addEventListener("click", () => goStep(Number(b.dataset.step), b)));
@@ -976,11 +977,10 @@ function aboutBox() {
 // ---------- render ----------
 function heroHtml() {
   const gs = GPU_ORDER.map((c) => S.index.find((x) => x.code === c)).filter(Boolean);
-  return `<header class="hero">
-    <div class="heromark">${mascot("big")}</div>
-    <h1>Trade the price<br>of <span class="grad">AI compute.</span></h1>
-    <p class="sub">Bet on what AI chips cost to rent.</p>
-  </header>${gs.length ? assetsHtml() : ""}`;
+  return `<header class="hero"><div class="herorow">
+    <div class="herotext"><h1>Bet on the price<br>of <span class="grad">AI chips.</span></h1>
+    <p class="sub">Will renting an H100 cost more or less tomorrow?<br>Pick a side. Get paid if you're right.</p></div>
+    ${mascot("big")}</div></header>${gs.length ? assetsHtml() : ""}`;
 }
 function render() {
   const views = { trade: tradeView, chain: chainView, hedge: hedgeView, earn: earnView, activity: activityView, portfolio: portfolioView };
