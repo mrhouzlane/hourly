@@ -1,0 +1,11 @@
+{
+  "name": "hourly-functions",
+  "private": true,
+  "description": "Chainlink Functions source for Hourly settlement and its local simulation (Deno 1.46.3 must be on PATH).",
+  "scripts": {
+    "simulate": "node simulate.mjs"
+  },
+  "dependencies": {
+    "@chainlink/functions-toolkit": "0.3.2"
+  }
+}
