@@ -160,16 +160,33 @@ function walletPicker(after) {
 }
 function ensureWallet(then) { if (S.wallet) return then(); walletPicker(then); }
 
+// sliding pill under the active tab, kept across re-renders so it glides
+const PILLS = {};
+function slidePill(box, key) {
+  const on = box && box.querySelector(".on");
+  if (!on) return;
+  const pill = document.createElement("span");
+  pill.className = "pill";
+  box.prepend(pill);
+  const to = { x: on.offsetLeft, y: on.offsetTop, w: on.offsetWidth, h: on.offsetHeight };
+  const from = PILLS[key] || to;
+  PILLS[key] = to;
+  const set = (v) => { pill.style.width = `${v.w}px`; pill.style.height = `${v.h}px`; pill.style.transform = `translate(${v.x}px,${v.y}px)`; };
+  pill.style.transition = "none"; set(from);
+  requestAnimationFrame(() => requestAnimationFrame(() => { pill.style.transition = ""; set(to); }));
+}
+
 // ---------- menu bar ----------
 function renderMenu() {
   const g = S.index.find((x) => x.code === "H100_SXM");
   $("#menubar").innerHTML = `
     <button data-view="about" title="About Hourly"><img class="logo" src="mark.svg" alt=""></button>
-    ${[["trade", "Trade"], ["hedge", "Hedge"], ["earn", "Earn"], ["activity", "Activity"], ["portfolio", "Portfolio"]]
+    ${[["trade", "Trade"], ["chain", "Chain"], ["hedge", "Hedge"], ["earn", "Earn"], ["activity", "Activity"], ["portfolio", "Portfolio"]]
       .map(([k, t]) => `<button data-view="${k}" class="${S.view === k ? "on" : ""}">${t}</button>`).join("")}
     <span class="spacer"></span>
     <span class="ticker">${g ? `H100 <b>$${g.last.toFixed(2)}</b>/hr` : ""}</span>
     <button id="wallet-btn">${S.wallet ? `${S.wallet.address.slice(0, 4)}…${S.wallet.address.slice(-4)}` : "Connect"}</button>`;
+  slidePill($("#menubar"), "menu");
   $$("#menubar [data-view]").forEach((b) => b.addEventListener("click", () => {
     if (b.dataset.view === "about") return aboutBox();
     S.view = b.dataset.view; renderMenu(); render();
@@ -233,7 +250,7 @@ function tradeView() {
   return windowShell("New Trade", `
     <div class="steps">${steps}</div>
     <div class="wizard">
-      <div class="panel"><div id="step" class="enter">${stepHtml()}</div></div>
+      <div class="panel"><div id="step" class="enter ${t.dir === "back" ? "back" : ""}">${stepHtml()}</div></div>
       <div class="chartpane">
         <div class="quote"><span>${esc(gpuLabel(t.gpu))} rental, per hour</span><span class="px">${lastPrint(t.gpu) ? `$${lastPrint(t.gpu).toFixed(2)}` : ""}</span></div>
         <div class="chart" id="chart">${chartSvg()}</div>
@@ -358,8 +375,8 @@ function chartSvg() {
   return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Recent prints with your level and date">
     <defs><pattern id="dith" width="2" height="2" patternUnits="userSpaceOnUse"><rect width="1" height="1" fill="#2f6bff"/><rect x="1" y="1" width="1" height="1" fill="#2f6bff"/></pattern></defs>
     ${extra}
-    <path d="${path}" fill="none" stroke="#dbe6ff" stroke-width="2.5" stroke-dasharray="${len}" stroke-dashoffset="${len}" style="animation: draw .9s steps(18) forwards"/>
-    <rect x="${lp[0] - 3}" y="${lp[1] - 3}" width="6" height="6" fill="#2f6bff"/>
+    <path d="${path}" fill="none" stroke="#dbe6ff" stroke-width="2.5" stroke-dasharray="${len}" stroke-dashoffset="${len}" style="animation: draw .9s cubic-bezier(.22,1,.36,1) forwards"/>
+    <rect class="live" x="${lp[0] - 3}" y="${lp[1] - 3}" width="6" height="6" fill="#6fa0ff"/>
     <text x="${L}" y="${H - 8}">${day(hist[0][0])}</text>
     <style>@keyframes draw{to{stroke-dashoffset:0}}</style>
   </svg>`;
@@ -369,11 +386,11 @@ function refreshChart() { const c = $("#chart"); if (c) c.innerHTML = chartSvg()
 
 function goStep(k, fromEl) {
   const t = S.t;
+  t.dir = k < t.step ? "back" : "fwd";
   t.step = k; t.hl = 0;
   if (k === 2) { const ks = levelsFor(t.gpu); const lp = lastPrint(t.gpu) || 0; t.hl = Math.max(0, ks.findIndex((x) => x >= lp)); }
   if (k <= 3) t.quote = null;
   render();
-  zoom(fromEl, $("#step"));
   if (k === 4) bindAmount();
   if (k === 5) fetchQuote();
 }
@@ -470,6 +487,97 @@ document.addEventListener("keydown", (e) => {
   else return;
   $$("[data-opt]").forEach((x, j) => x.classList.toggle("hl", j === t.hl));
   previewHover();
+});
+
+// ---------- option chain: every strike and date as a live ladder ----------
+S.chain = { gpu: "H100_SXM", date: null, row: 0, side: "higher", prev: {} };
+const chainDates = (gpu) => [...new Set(predict().filter((m) => m.underlying === gpu).map((m) => m.windowEnd))].sort();
+function chainRows() {
+  const c = S.chain;
+  return predict().filter((m) => m.underlying === c.gpu && m.windowEnd === c.date).sort((a, b) => b.strike - a.strike);
+}
+function distStrip(rows, spot, cur) {
+  const d = rows[0] && rows[0].model.dist;
+  if (!d) return "";
+  const W = 1000, H = 84, lo = d.lo, hi = d.hi, X = (v) => Math.max(0, Math.min(W, ((v - lo) / (hi - lo)) * W));
+  const bw = W / d.bins.length;
+  const bars = d.bins.map((b, i) => `<rect x="${(i * bw + 1).toFixed(1)}" y="${(H - 14 - b * (H - 24)).toFixed(1)}" width="${(bw - 2).toFixed(1)}" height="${(b * (H - 24)).toFixed(1)}"/>`).join("");
+  const ticks = rows.map((m) => `<line x1="${X(m.strike)}" x2="${X(m.strike)}" y1="${H - 14}" y2="${H - 8}" stroke="#6fa0ff"/>`).join("");
+  const m = rows[cur];
+  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" class="strip" aria-label="Where the model expects the print to land">
+    <g class="bars">${bars}</g>${ticks}
+    <line x1="${X(spot)}" x2="${X(spot)}" y1="0" y2="${H - 14}" stroke="#fff" stroke-dasharray="2 3"/>
+    ${m ? `<line class="curline" x1="${X(m.strike)}" x2="${X(m.strike)}" y1="0" y2="${H - 6}" stroke="#6fa0ff" stroke-width="2"/>` : ""}
+    <line x1="0" x2="${W}" y1="${H - 14}" y2="${H - 14}" stroke="rgba(160,190,255,.5)"/></svg>`;
+}
+function chainView() {
+  const c = S.chain, dates = chainDates(c.gpu);
+  if (!dates.includes(c.date)) c.date = dates[0];
+  const rows = chainRows(), spot = lastPrint(c.gpu) || 0;
+  if (c.row >= rows.length) c.row = Math.max(0, rows.length - 1);
+  const maxOI = Math.max(1, ...rows.map((m) => m.openInterest || 0));
+  const next = {};
+  const cell = (m, side, i) => {
+    const px = sideUnit(m, side), ch = sideChance(m, side), key = `${m.id}:${side}`;
+    next[key] = px;
+    const was = c.prev[key], fl = was === undefined || was === px ? "" : px > was ? "up" : "dn";
+    const cur = i === c.row && c.side === side ? " cur" : "";
+    return `<button class="cell ${side === "lower" ? "lo" : "hi"}${cur} ${fl}" data-r="${i}" data-side="${side}" style="--p:${Math.round(ch * 100)}%">
+      <span class="pr">${Math.round(px * 100)}<small>¢</small></span><span class="ch">${pct(ch)}</span></button>`;
+  };
+  let body = "", placed = false;
+  const spotRow = `<div class="crow spot"><span class="lab">${esc(gpuLabel(c.gpu))} now</span><b>${usd(spot)}</b><span class="lab">live</span></div>`;
+  rows.forEach((m, i) => {
+    if (!placed && m.strike < spot) { body += spotRow; placed = true; }
+    const oi = m.openInterest || 0;
+    body += `<div class="crow ${i === c.row ? "cur" : ""}">
+      ${cell(m, "lower", i)}
+      <div class="mid"><b>${usd(m.strike)}</b><span class="oi" title="open interest, contracts"><i style="width:${Math.max(oi ? 8 : 0, (oi / maxOI) * 100)}%"></i></span><small>spread ${Math.round((m.model.ask - m.model.bid) * 100)}¢</small></div>
+      ${cell(m, "higher", i)}</div>`;
+  });
+  if (!placed && rows.length) body += spotRow;
+  c.prev = next;
+  const sel = rows[c.row];
+  return windowShell("Option chain", `
+    <div class="chainbar">
+      <div class="seg">${GPU_ORDER.map((g) => `<button data-cg="${g}" class="${g === c.gpu ? "on" : ""}">${esc((S.index.find((x) => x.code === g) || {}).label || g).split(" ")[0]}</button>`).join("")}</div>
+      <div class="dates">${dates.map((d) => `<button data-cd="${d}" class="${d === c.date ? "on" : ""}">${day(d)}</button>`).join("")}</div>
+    </div>
+    <div class="stripbox"><div class="eyebrow">WHERE THE MODEL EXPECTS ${esc(gpuLabel(c.gpu)).toUpperCase()} TO PRINT / ${day(c.date).toUpperCase()}</div>${distStrip(rows, spot, c.row)}</div>
+    <div class="chead"><span>Lower<small>price per $1 / chance</small></span><span>Strike</span><span>Higher<small>price per $1 / chance</small></span></div>
+    <div class="ladder">${body || '<p class="muted" style="padding:20px">No open markets for this chip yet.</p>'}</div>
+    <div class="hint"><span><kbd>↑</kbd> <kbd>↓</kbd> strike</span><span><kbd>←</kbd> <kbd>→</kbd> side</span><span><kbd>Enter</kbd> trade ${sel ? usd(sel.strike) : ""}</span><span class="spacer"></span><span>Prices are the venue's quote for a $1 payout. Bar = open interest.</span></div>`);
+}
+function chainOpen(m, side) {
+  S.t = { ...S.t, gpu: m.underlying, side, strike: m.strike, seriesId: m.id, quote: null, hl: 0, step: 3 };
+  S.view = "trade"; renderMenu(); goStep(4);
+}
+function bindChain() {
+  const c = S.chain, rows = chainRows();
+  $$("[data-cg]").forEach((b) => b.addEventListener("click", () => { c.gpu = b.dataset.cg; c.date = null; c.row = 0; render(); }));
+  $$("[data-cd]").forEach((b) => b.addEventListener("click", () => { c.date = b.dataset.cd; c.row = 0; render(); }));
+  $$(".cell").forEach((b) => {
+    b.addEventListener("mouseenter", () => { c.row = Number(b.dataset.r); c.side = b.dataset.side; markChain(); });
+    b.addEventListener("click", () => { const m = rows[Number(b.dataset.r)]; if (m) chainOpen(m, b.dataset.side); });
+  });
+}
+function markChain() {
+  const rows = chainRows(), c = S.chain;
+  $$(".crow:not(.spot)").forEach((r, i) => r.classList.toggle("cur", i === c.row));
+  $$(".cell").forEach((b) => b.classList.toggle("cur", Number(b.dataset.r) === c.row && b.dataset.side === c.side));
+  const sv = $(".stripbox svg"); if (sv) sv.outerHTML = distStrip(rows, lastPrint(c.gpu) || 0, c.row).replace("<svg", '<svg data-live="1"');
+}
+document.addEventListener("keydown", (e) => {
+  if (S.view !== "chain" || document.querySelector(".modal")) return;
+  const c = S.chain, rows = chainRows();
+  if (!rows.length) return;
+  if (e.key === "ArrowDown") c.row = Math.min(rows.length - 1, c.row + 1);
+  else if (e.key === "ArrowUp") c.row = Math.max(0, c.row - 1);
+  else if (e.key === "ArrowLeft") c.side = "lower";
+  else if (e.key === "ArrowRight") c.side = "higher";
+  else if (e.key === "Enter") return chainOpen(rows[c.row], c.side);
+  else return;
+  e.preventDefault(); markChain();
 });
 
 // ---------- hedge ----------
@@ -729,10 +837,11 @@ function heroHtml() {
     </div></header>`;
 }
 function render() {
-  const views = { trade: tradeView, hedge: hedgeView, earn: earnView, activity: activityView, portfolio: portfolioView };
+  const views = { trade: tradeView, chain: chainView, hedge: hedgeView, earn: earnView, activity: activityView, portfolio: portfolioView };
   $("#desk").innerHTML = (S.view === "trade" ? heroHtml() : "") + views[S.view]();
   $$("[data-home]").forEach((b) => b.addEventListener("click", () => { S.view = "trade"; renderMenu(); render(); }));
-  ({ trade: bindTrade, hedge: bindHedge, earn: bindEarn, activity: bindActivity, portfolio: bindPortfolio })[S.view]();
+  ({ trade: bindTrade, chain: bindChain, hedge: bindHedge, earn: bindEarn, activity: bindActivity, portfolio: bindPortfolio })[S.view]();
+  slidePill($(".steps"), "steps");
 }
 
 async function refreshMarkets() {
