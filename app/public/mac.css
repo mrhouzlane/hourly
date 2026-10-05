@@ -943,3 +943,8 @@ body { background: #fbfcff; background-image: none; }
 .feed .wall > * { border-radius: 18px; }
 @media (max-width: 560px) { .agrid, .egrid { grid-template-columns: 1fr 1fr !important; gap: 10px; } .asset .ap .pr { font-size: 20px; } .menubar { overflow-x: auto; scrollbar-width: none; } .menubar button { padding: 0 10px; font-size: 13px; } #wallet-btn { padding: 0 12px; } .hero h1 { font-size: 32px; } }
 @media (max-width: 560px) { .menubar { padding: 0 10px; gap: 0; overflow: visible; } .menubar button { padding: 0 7px; font-size: 12.5px; } .menubar button.brand { font-size: 22px; padding-right: 6px; } #wallet-btn { padding: 0 11px; font-size: 12.5px; } .mascot.big { display: block !important; } }
+.subtabs { display: flex; justify-content: center; margin: 0 auto 22px; }
+.subtabs { width: fit-content; background: #f3f6fe; border: 1px solid var(--line); border-radius: 999px; padding: 3px; gap: 2px; }
+.subtabs button { border: 0; background: none; border-radius: 999px; padding: 7px 20px; font: 600 14px var(--text); color: #6a7092; cursor: pointer; transition: background .25s var(--ease), color .2s; }
+.subtabs button.on { background: #fff; color: var(--blue); box-shadow: 0 1px 4px rgba(10,14,40,.12); }
+.hero { margin-bottom: 28px; } .hero .sub { margin-bottom: 0; }

@@ -218,8 +218,8 @@ function renderMenu() {
   const g = S.index.find((x) => x.code === "H100_SXM");
   $("#menubar").innerHTML = `
     <button data-view="about" class="brand" title="About Hourly">Hourly</button>
-    ${[["trade", "Trade"], ["hedge", "Protect"], ["earn", "Earn"], ["activity", "Activity"], ["portfolio", "Portfolio"]]
-      .map(([k, t]) => `<button data-view="${k}" class="${S.view === k ? "on" : ""}">${t}</button>`).join("")}
+    ${[["trade", "Trade"], ["hedge", "Protect & Earn"], ["activity", "Activity"]]
+      .map(([k, t]) => `<button data-view="${k}" class="${S.view === k || (k === "hedge" && S.view === "earn") ? "on" : ""}">${t}</button>`).join("")}
     <span class="spacer"></span>
     <button id="wallet-btn">${S.wallet ? `${S.wallet.address.slice(0, 4)}…${S.wallet.address.slice(-4)}` : "Connect"}</button>`;
   slidePill($("#menubar"), "menu");
@@ -230,8 +230,8 @@ function renderMenu() {
   $("#wallet-btn").addEventListener("click", () => {
     if (!S.wallet) return walletPicker();
     dialog(`<div class="icon">◆</div><b>${esc(S.wallet.name)}</b><p class="mono">${esc(S.wallet.address)}</p>
-      <div class="actions"><button class="btn" data-close>Cancel</button><button class="btn default" id="dc">Disconnect</button></div>`,
-    (m, close) => $("#dc", m).addEventListener("click", async () => { await S.wallet.disconnect(); await setWallet(null); close(); }));
+      <div class="actions"><button class="btn" id="mt">My trades</button><button class="btn default" id="dc">Disconnect</button></div>`,
+    (m, close) => { $("#mt", m).addEventListener("click", () => { close(); S.view = "portfolio"; renderMenu(); render(); }); $("#dc", m).addEventListener("click", async () => { await S.wallet.disconnect(); await setWallet(null); close(); }); });
   });
 }
 
@@ -356,11 +356,9 @@ function tradeView() {
       <div class="panel"><div id="step" class="enter ${t.dir === "back" ? "back" : ""}">${stepHtml()}</div></div>
       <div class="chartpane">
         <div class="quote"><span>${esc(gpuLabel(t.gpu))} rental, per hour</span><span class="px">${lastPrint(t.gpu) ? `$${lastPrint(t.gpu).toFixed(2)}` : ""}</span></div>
-        <div class="rng">${[[7, "1W"], [30, "1M"], [90, "3M"]].map(([n, l]) => `<button data-rng="${n}" class="${(t.range || 30) === n ? "on" : ""}">${l}</button>`).join("")}</div>
         <div class="chart" id="chart">${chartSvg()}</div>
       </div>
-    </div>
-    <div class="hint"><span><a href="#" id="to-chain">Pro view: option chain</a></span></div>`);
+    </div>`);
 }
 
 function optionsList() {
@@ -984,8 +982,6 @@ function heroHtml() {
     ${mascot("big")}
     <h1>Bet on the price of <span class="serif">AI chips.</span></h1>
     <p class="sub">Will renting an H100 cost more or less tomorrow? Pick a side. Get paid if you're right.</p>
-    <div class="composer"><div class="cline"><span id="cq"></span><i class="caret"></i></div>
-      <div class="crow"><div class="sugs">${sug}</div><button class="go" id="go" aria-label="Start">→</button></div></div>
   </header>${gs.length ? assetsHtml() : ""}`;
 }
 let tyTok = 0;
@@ -1015,12 +1011,13 @@ function startFrom(gpu, side) {
   const w = $(".window"); if (w) w.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 function render() {
-  const views = { trade: tradeView, chain: chainView, hedge: hedgeView, earn: earnView, activity: activityView, portfolio: portfolioView };
+  const sub = () => `<div class="subtabs"><button data-sub="hedge" class="${S.view === "hedge" ? "on" : ""}">Protect</button><button data-sub="earn" class="${S.view === "earn" ? "on" : ""}">Earn</button></div>`;
+  const views = { trade: tradeView, chain: chainView, hedge: () => sub() + hedgeView(), earn: () => sub() + earnView(), activity: activityView, portfolio: portfolioView };
   $("#desk").innerHTML = (S.view === "trade" ? heroHtml() : "") + views[S.view]();
   $$("[data-home]").forEach((b) => b.addEventListener("click", () => { S.view = "trade"; renderMenu(); render(); }));
   ({ trade: bindTrade, chain: bindChain, hedge: bindHedge, earn: bindEarn, activity: bindActivity, portfolio: bindPortfolio })[S.view]();
   slidePill($(".steps"), "steps");
-  typeLoop();
+  $$("[data-sub]").forEach((b) => b.addEventListener("click", () => { S.view = b.dataset.sub; renderMenu(); render(); }));
   $$("[data-sug]").forEach((b) => b.addEventListener("click", () => startFrom(b.dataset.sug, b.dataset.dir)));
   const go = $("#go"); if (go) go.addEventListener("click", () => startFrom(S.t.gpu, null));
   $$("[data-asset]").forEach((b) => b.addEventListener("click", () => {
