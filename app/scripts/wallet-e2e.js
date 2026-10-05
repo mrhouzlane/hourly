@@ -52,6 +52,7 @@ const SHOTS = process.env.SHOTS || "/home/mehdi_quantum3labs_com/compute-options
     await page.waitForFunction((a) => document.querySelector("#wallet-btn").textContent.startsWith(a.slice(0, 4)), kp.publicKey.toBase58(), { timeout: 5000 });
   });
   const wizard = (side, label) => step(label, async () => {
+    await page.screenshot({ path: `${SHOTS}/after-connect.png` });
     await page.click('#menubar [data-view="trade"]');
     await page.click(`[data-opt="${side}"]`);
     await page.click("[data-opt]");            // first level
