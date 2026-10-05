@@ -267,22 +267,24 @@ const CHIPS = {
   B200: { maker: "NVIDIA", arch: "Blackwell", mem: "192GB HBM3e", tag: "The new frontier-model chip", uses: ["Frontier training", "Reasoning"], hue: "#18b6ff", hbm: 4, dies: 2 },
   A100_SXM4: { maker: "NVIDIA", arch: "Ampere", mem: "80GB HBM2e", tag: "The veteran, now the cheap tier", uses: ["Fine-tuning", "Batch jobs"], hue: "#7f95c9", hbm: 3, dies: 1 },
 };
-function chipArt(code, big) {
-  const c = CHIPS[code] || CHIPS.H100_SXM, id = `ca${code}${big ? "b" : ""}`;
-  const hb = (x, y) => `<rect x="${x}" y="${y}" width="14" height="9" rx="1.5" class="hbm"/>`;
-  let mem = "";
-  for (let i = 0; i < c.hbm; i++) { const y = 17 + i * (c.dies === 2 ? 14 : 15); mem += hb(14, y) + hb(92, y); }
-  const dies = c.dies === 2
-    ? `<rect x="33" y="24" width="25" height="42" rx="3" class="die"/><rect x="62" y="24" width="25" height="42" rx="3" class="die"/><rect x="56" y="38" width="8" height="14" class="link"/>`
-    : `<rect x="36" y="22" width="48" height="46" rx="4" class="die"/>`;
-  return `<svg viewBox="0 0 120 90" class="chipart" style="--h:${c.hue}" aria-hidden="true">
-    <defs><linearGradient id="${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${c.hue}" stop-opacity=".95"/><stop offset="1" stop-color="#0a1250"/></linearGradient>
-    <pattern id="${id}p" width="6" height="6" patternUnits="userSpaceOnUse"><path d="M0 0H6M0 0V6" stroke="#fff" stroke-opacity=".25" stroke-width=".5"/></pattern></defs>
-    <rect x="6" y="6" width="108" height="78" rx="8" class="pkg"/>
-    ${mem}${dies.replace(/class="die"/g, `class="die" fill="url(#${id})"`)}
-    <rect x="36" y="22" width="48" height="46" rx="4" fill="url(#${id}p)" opacity=".6" ${c.dies === 2 ? 'style="display:none"' : ""}/>
-    <g class="pins">${Array.from({ length: 14 }, (_, i) => `<rect x="${12 + i * 7.4}" y="2" width="3" height="5"/><rect x="${12 + i * 7.4}" y="83" width="3" height="5"/>`).join("")}</g>
-  </svg>`;
+function chipArt(code) {
+  // each chip drawn from its own facts: die count, die size, and memory stacks filled by capacity
+  const c = CHIPS[code] || CHIPS.H100_SXM, id = `ca${code}`;
+  const gb = { H100_SXM: 80, H200: 141, B200: 192, A100_SXM4: 80 }[code] || 80, fill = gb / 192;
+  const n = c.dies === 2 ? 4 : 3, bw = c.dies === 2 ? 6 : 7, gap = 3;
+  const stack = (x0) => Array.from({ length: n }, (_, i) => {
+    const x = x0 + i * (bw + gap), h = 46, y = 17, fh = Math.max(4, h * fill);
+    return `<rect x="${x}" y="${y}" width="${bw}" height="${h}" rx="1.5" class="hbm"/><rect x="${x}" y="${y + h - fh}" width="${bw}" height="${fh}" rx="1.5" class="hbmf"/>`;
+  }).join("");
+  const wL = n * (bw + gap) - gap, xR = 120 - 10 - wL;
+  const die = c.dies === 2
+    ? `<rect x="46" y="22" width="13" height="36" rx="3" class="die"/><rect x="61" y="22" width="13" height="36" rx="3" class="die"/><rect x="59" y="36" width="2" height="8" class="link"/>`
+    : code === "A100_SXM4" ? `<rect x="44" y="26" width="32" height="28" rx="3" class="die"/>` : `<rect x="40" y="22" width="40" height="36" rx="3" class="die"/>`;
+  return `<svg viewBox="0 0 120 80" class="chipart" style="--h:${c.hue}" aria-hidden="true">
+    <defs><linearGradient id="${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${c.hue}"/><stop offset="1" stop-color="#0a1250"/></linearGradient></defs>
+    <rect x="3" y="3" width="114" height="74" rx="8" class="pkg"/>
+    ${stack(10)}${stack(xR)}${die.replace(/class="die"/g, `class="die" fill="url(#${id})"`)}
+    <text x="60" y="${c.dies === 2 ? 74 : 44}" text-anchor="middle" class="gbt" ${c.dies === 2 ? 'fill="#9fb2e8"' : ""}>${gb}GB</text></svg>`;
 }
 const spark = (h) => {
   const v = h.slice(-30).map((p) => p[1]), lo = Math.min(...v), hi = Math.max(...v) || 1, w = 100, ht = 26;
@@ -298,7 +300,7 @@ function assetsHtml() {
   const cards = GPU_ORDER.map((c) => S.index.find((x) => x.code === c)).filter(Boolean).map((g) => {
     const k = CHIPS[g.code] || {};
     return `<button class="asset ${S.t.gpu === g.code ? "on" : ""}" data-asset="${g.code}" style="--h:${k.hue || "#2f6bff"}">
-      <div class="art">${chipArt(g.code, true)}</div>
+      <div class="art">${chipArt(g.code)}</div>
       <div class="ah"><b>${esc(g.label)}</b></div>
       <div class="ap"><span class="pr">$${g.last.toFixed(2)}<small>/hr</small></span><em class="${g.chg7 >= 0 ? "up" : "dn"}">${g.chg7 >= 0 ? "▲" : "▼"} ${(Math.abs(g.chg7) * 100).toFixed(1)}%</em></div></button>`;
   }).join("");

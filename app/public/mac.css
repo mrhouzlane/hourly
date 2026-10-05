@@ -779,3 +779,12 @@ body::before { position: absolute; background: repeating-conic-gradient(rgba(255
 .hint { background: rgba(255,255,255,.5); }
 .ladder { background: rgba(255,255,255,.85); }
 body { display: flow-root; }
+
+/* v17: distinct chip art */
+.chipart .pkg { fill: #0b1240; stroke: var(--h); stroke-width: 1.6; }
+.chipart .hbm { fill: rgba(255,255,255,.08); stroke: rgba(255,255,255,.28); stroke-width: .6; }
+.chipart .hbmf { fill: var(--h); opacity: .9; }
+.chipart .die { stroke: #fff; stroke-opacity: .8; stroke-width: 1; }
+.chipart .gbt { fill: #fff; font-family: var(--mono); font-size: 9px; font-weight: 500; letter-spacing: .04em; }
+.chipart .pins { display: none; }
+.asset .art { padding: 8px 10px; }
