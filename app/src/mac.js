@@ -236,7 +236,7 @@ function renderMenu() {
 }
 
 function windowShell(title, body) {
-  return `<section class="window"><div class="titlebar"><span class="tt"><i class="dot"></i>HOURLY / ${esc(title).toUpperCase()}</span></div>${body}</section>`;
+  return `<section class="window"><div class="titlebar"><span class="sq"><i></i><i></i><i></i></span><span class="tt">HOURLY / ${esc(title).toUpperCase()}</span><span class="ar">↗</span></div>${body}</section>`;
 }
 
 // ---------- classic zoom rectangles (Finder open/close motion) ----------
