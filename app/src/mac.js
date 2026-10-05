@@ -381,8 +381,14 @@ function stepHtml() {
       { key: "higher", glyph: "▲", t: "Higher", cls: "up" },
       { key: "lower", glyph: "▼", t: "Lower", cls: "dn" },
     ];
-    return `<h2>${g} tomorrow</h2><p class="lead small">${m ? `Around $${atm.toFixed(2)} an hour. Which way does it go?` : "Which way does it go?"}</p>
-      <div class="options pm">${sides.map((o, i) => `<button class="opt ${o.cls} ${i === t.hl ? "hl" : ""}" data-opt="${o.key}"><span class="glyph">${o.glyph}</span><span class="t">${o.t}</span><span class="r">${m ? cents(sideUnit(m, o.key)) : ""}</span></button>`).join("")}</div>`;
+    const ph = m ? m.model.probItm : 0.5;
+    return `<h2>Will ${g} cost more or less than $${(atm ?? last).toFixed(2)} an hour tomorrow?</h2>
+      <div class="split"><i style="width:${Math.round(ph * 100)}%"></i></div>
+      <div class="options pm">${sides.map((o) => {
+        const c = o.key === "higher" ? ph : 1 - ph;
+        return `<button class="opt ${o.cls} ${sides.indexOf(o) === t.hl ? "hl" : ""}" data-opt="${o.key}"><span class="glyph">${o.glyph}</span><span class="t">${o.t}</span><span class="big">${pct(c)}</span><span class="r">${m ? `${cents(sideUnit(m, o.key))} to win $1` : ""}</span></button>`;
+      }).join("")}</div>
+      <p class="how">Pick a side, then a price and a day. If you're right when the day ends, each contract pays $1.</p>`;
   }
   const row = (i, label, m, k) => {
     const ch = m ? sideChance(m, t.side) : 0;

@@ -1136,3 +1136,15 @@ body { background: var(--b50); color: var(--ink); }
 .chart .lvlbox { fill: var(--blue); }
 .hero .sub, .panel .lead { color: #4a5f9e; }
 .subtabs button.on { color: var(--blue); }
+
+/* v28: step 1 reads as a question */
+.panel h2 { line-height: 1.12; }
+.split { height: 8px; border-radius: 99px; background: var(--navy2); overflow: hidden; margin: 14px 0 16px; }
+.split i { display: block; height: 100%; background: var(--blue); border-radius: 99px; transition: width .8s var(--ease); }
+.options.pm .opt { min-height: 0; gap: 2px; padding: 18px 20px; }
+.options.pm .opt .t { font-size: 20px; font-weight: 700; }
+.options.pm .opt .big { font-size: 52px; font-weight: 800; letter-spacing: -.05em; line-height: 1; margin: 6px 0 4px; color: #fff; }
+.options.pm .opt .r { font-size: 14px; font-weight: 600; opacity: .85; }
+.options.pm .glyph { position: absolute; top: 16px; right: 16px; width: 30px; height: 30px; font-size: 13px; }
+.options.pm .opt { position: relative; }
+.how { color: #4a5f9e; font-size: 14px; line-height: 1.5; margin: 16px 0 0; }
