@@ -218,7 +218,7 @@ function renderMenu() {
   const g = S.index.find((x) => x.code === "H100_SXM");
   $("#menubar").innerHTML = `
     <button data-view="about" class="brand" title="About Hourly">Hourly</button>
-    ${[["trade", "Trade"], ["hedge", "Protect & Earn"], ["activity", "Activity"]]
+    ${[["trade", "Trade"], ["hedge", "Protect & Earn"]]
       .map(([k, t]) => `<button data-view="${k}" class="${S.view === k || (k === "hedge" && S.view === "earn") ? "on" : ""}">${t}</button>`).join("")}
     <span class="spacer"></span>
     <button id="wallet-btn">${S.wallet ? `${S.wallet.address.slice(0, 4)}…${S.wallet.address.slice(-4)}` : "Connect"}</button>`;
@@ -1010,13 +1010,29 @@ function startFrom(gpu, side) {
   render();
   const w = $(".window"); if (w) w.scrollIntoView({ behavior: "smooth", block: "start" });
 }
+function liveHtml() {
+  const a = S.activity, rows = a ? a.trades.slice(0, 14) : [];
+  const row = (x) => {
+    const can = x.door === "predict" && x.open;
+    return `<${can ? "button" : "div"} class="lrow" ${can ? `data-copy="${esc(x.series)}" data-side="${x.direction}" title="Copy this trade"` : ""}>
+      <span class="av" style="--hu:${hueOf(x.name)}">${esc(initials(x.name))}</span>
+      <span class="lt"><b>${esc(x.name)}</b><em>${esc(x.gpu)} <i class="${x.direction}">${x.direction === "higher" ? "▲ higher" : "▼ lower"}</i></em></span>
+      <span class="la">${usd(x.cost)}<small>${ago(x.at)}</small></span></${can ? "button" : "div"}>`;
+  };
+  return `<aside class="live"><div class="lh"><b><i class="ldot"></i>Live calls</b><button class="lall" data-view-go="activity">All</button></div>
+    <div class="lbody">${rows.length ? rows.map(row).join("") : '<p class="muted">No calls yet.</p>'}</div>
+    <div class="lf"><a class="xcta" href="${xShare("My call on AI chip rental prices, on Hourly.")}" target="_blank" rel="noopener">${XGLYPH}<span>Post your call</span></a></div></aside>`;
+}
 function render() {
   const sub = () => `<div class="subtabs"><button data-sub="hedge" class="${S.view === "hedge" ? "on" : ""}">Protect</button><button data-sub="earn" class="${S.view === "earn" ? "on" : ""}">Earn</button></div>`;
   const views = { trade: tradeView, chain: chainView, hedge: () => sub() + hedgeView(), earn: () => sub() + earnView(), activity: activityView, portfolio: portfolioView };
-  $("#desk").innerHTML = (S.view === "trade" ? heroHtml() : "") + views[S.view]();
+  $("#desk").innerHTML = S.view === "trade" ? `<div class="shell"><div class="main">${heroHtml()}${views.trade()}</div>${liveHtml()}</div>` : views[S.view]();
+  document.body.classList.toggle("fit", S.view === "trade");
   $$("[data-home]").forEach((b) => b.addEventListener("click", () => { S.view = "trade"; renderMenu(); render(); }));
   ({ trade: bindTrade, chain: bindChain, hedge: bindHedge, earn: bindEarn, activity: bindActivity, portfolio: bindPortfolio })[S.view]();
   slidePill($(".steps"), "steps");
+  $$("[data-view-go]").forEach((b) => b.addEventListener("click", () => { S.view = b.dataset.viewGo; renderMenu(); render(); }));
+  if (S.view === "trade") bindActivity();
   $$("[data-sub]").forEach((b) => b.addEventListener("click", () => { S.view = b.dataset.sub; renderMenu(); render(); }));
   $$("[data-sug]").forEach((b) => b.addEventListener("click", () => startFrom(b.dataset.sug, b.dataset.dir)));
   const go = $("#go"); if (go) go.addEventListener("click", () => startFrom(S.t.gpu, null));
