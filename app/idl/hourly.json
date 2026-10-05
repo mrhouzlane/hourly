@@ -131,7 +131,7 @@
       ],
       "accounts": [
         {
-          "name": "admin",
+          "name": "lister",
           "writable": true,
           "signer": true,
           "relations": [
@@ -277,7 +277,7 @@
       ],
       "accounts": [
         {
-          "name": "admin",
+          "name": "lister",
           "writable": true,
           "signer": true,
           "relations": [
@@ -412,6 +412,10 @@
         },
         {
           "name": "max_series_bps",
+          "type": "u16"
+        },
+        {
+          "name": "max_epoch_bps",
           "type": "u16"
         }
       ]
@@ -615,6 +619,14 @@
         {
           "name": "fee_bps",
           "type": "u16"
+        },
+        {
+          "name": "lister",
+          "type": "pubkey"
+        },
+        {
+          "name": "min_oracle_sigs",
+          "type": "u8"
         }
       ]
     },
@@ -832,6 +844,151 @@
         {
           "name": "fee_bps",
           "type": "u16"
+        }
+      ]
+    },
+    {
+      "name": "set_lister",
+      "discriminator": [
+        170,
+        25,
+        175,
+        165,
+        190,
+        207,
+        218,
+        115
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "lister",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "set_min_oracle_sigs",
+      "discriminator": [
+        78,
+        95,
+        107,
+        195,
+        170,
+        211,
+        109,
+        150
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "min_oracle_sigs",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "set_paused",
+      "docs": [
+        "Emergency switch: stops new fills and vault deposits. Settlement,",
+        "redemption and withdrawals keep working so funds can always leave."
+      ],
+      "discriminator": [
+        91,
+        60,
+        125,
+        192,
+        176,
+        225,
+        166,
+        218
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "paused",
+          "type": "bool"
         }
       ]
     },
@@ -1887,6 +2044,16 @@
       "code": 6019,
       "name": "SeriesOutsideEpoch",
       "msg": "series expires after the vault's epoch"
+    },
+    {
+      "code": 6020,
+      "name": "Paused",
+      "msg": "venue is paused"
+    },
+    {
+      "code": 6021,
+      "name": "VaultPrice",
+      "msg": "vault trade price is outside the on-chain bounds"
     }
   ],
   "types": [
@@ -1918,6 +2085,18 @@
           {
             "name": "fee_bps",
             "type": "u16"
+          },
+          {
+            "name": "paused",
+            "type": "bool"
+          },
+          {
+            "name": "lister",
+            "type": "pubkey"
+          },
+          {
+            "name": "min_oracle_sigs",
+            "type": "u8"
           },
           {
             "name": "bump",
@@ -1998,6 +2177,14 @@
           {
             "name": "max_series_bps",
             "type": "u16"
+          },
+          {
+            "name": "max_epoch_bps",
+            "type": "u16"
+          },
+          {
+            "name": "at_risk",
+            "type": "u64"
           },
           {
             "name": "open_series",

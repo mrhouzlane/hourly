@@ -30,7 +30,12 @@ function loadKey(name) {
   const raw = JSON.parse(fs.readFileSync(path.join(KEYS_DIR, `${name}.json`), "utf8"));
   return Keypair.fromSecretKey(Uint8Array.from(raw));
 }
-const keys = { admin: loadKey("admin"), maker: loadKey("maker"), settler: loadKey("settler") };
+function loadOpt(name) { try { return loadKey(name); } catch (_) { return null; } }
+// Roles: admin = config authority (a multisig on mainnet, only for setters and init);
+// lister = lists series and vaults daily; payer = pays fees and rent, no authority;
+// maker = desk and vault quoter; settler = backup settlement only.
+const _admin = loadKey("admin");
+const keys = { admin: _admin, maker: loadKey("maker"), settler: loadKey("settler"), lister: loadOpt("lister") || _admin, payer: loadOpt("payer") || _admin };
 
 // ---------- persisted state ----------
 let state = { cluster: CLUSTER, quoteMint: null, treasury: null, feeBps: 100, series: {}, settlements: [], fills: [], vaults: {} };
@@ -65,8 +70,8 @@ async function sendAndConfirm(tx, signers) {
 
 async function send(ixs, signers, { units } = {}) {
   const tx = new Transaction().add(...computeIxs(units), ...ixs);
-  tx.feePayer = keys.admin.publicKey;
-  const all = [keys.admin, ...signers.filter((s) => !s.publicKey.equals(keys.admin.publicKey))];
+  tx.feePayer = keys.payer.publicKey;
+  const all = [keys.payer, ...signers.filter((s) => !s.publicKey.equals(keys.payer.publicKey))];
   return sendAndConfirm(tx, all);
 }
 
@@ -77,9 +82,9 @@ const PENDING_TTL_MS = 90_000;
 
 async function prepareUserTx({ ixs, user, venueSigners = [], meta = {}, units }) {
   const { blockhash, lastValidBlockHeight } = await conn.getLatestBlockhash("confirmed");
-  const tx = new Transaction({ feePayer: keys.admin.publicKey, blockhash, lastValidBlockHeight })
+  const tx = new Transaction({ feePayer: keys.payer.publicKey, blockhash, lastValidBlockHeight })
     .add(...computeIxs(units), ...ixs);
-  const signers = [keys.admin, ...venueSigners];
+  const signers = [keys.payer, ...venueSigners.filter((k) => !k.publicKey.equals(keys.payer.publicKey))];
   tx.partialSign(...signers);
   const message = tx.serializeMessage();
   const id = crypto.randomBytes(12).toString("hex");
@@ -163,17 +168,17 @@ async function positions(owner, seriesKeys) {
 // ---------- token helpers ----------
 function ataIx(mint, owner) {
   const a = chain.ata(mint, owner);
-  return { ata: a, ix: spl.createAssociatedTokenAccountIdempotentInstruction(keys.admin.publicKey, a, new PublicKey(owner), new PublicKey(mint)) };
+  return { ata: a, ix: spl.createAssociatedTokenAccountIdempotentInstruction(keys.payer.publicKey, a, new PublicKey(owner), new PublicKey(mint)) };
 }
 
 async function createQuoteMint() {
   const mint = Keypair.generate();
   const lamports = await spl.getMinimumBalanceForRentExemptMint(conn);
   const ixs = [
-    SystemProgram.createAccount({ fromPubkey: keys.admin.publicKey, newAccountPubkey: mint.publicKey, space: spl.MINT_SIZE, lamports, programId: spl.TOKEN_PROGRAM_ID }),
+    SystemProgram.createAccount({ fromPubkey: keys.payer.publicKey, newAccountPubkey: mint.publicKey, space: spl.MINT_SIZE, lamports, programId: spl.TOKEN_PROGRAM_ID }),
     spl.createInitializeMint2Instruction(mint.publicKey, 6, keys.admin.publicKey, null),
   ];
-  await send(ixs, [mint]);
+  await send(ixs, [mint, keys.admin]);
   return mint.publicKey;
 }
 
@@ -181,7 +186,7 @@ async function mintQuote(owner, usd) {
   const mint = new PublicKey(state.quoteMint);
   const { ata, ix } = ataIx(mint, owner);
   const amount = BigInt(Math.round(usd * 1e6));
-  return send([ix, spl.createMintToInstruction(mint, ata, keys.admin.publicKey, amount)], []);
+  return send([ix, spl.createMintToInstruction(mint, ata, keys.admin.publicKey, amount)], [keys.admin]);
 }
 
 // Explorer links only exist for public clusters; a private preview chain has none.

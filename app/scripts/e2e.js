@@ -17,7 +17,7 @@ const api = async (p, body) => {
   const f = await api("faucet", { owner });
   console.log("faucet", f.amount, f.signature.slice(0, 16));
   const markets = await api("markets");
-  const dig = markets.find((m) => m.door === "predict" && m.title.includes("H100") && m.title.includes("2.70"));
+  const dig = markets.filter((m) => m.door === "predict" && m.status === "open" && m.model).sort((a, b) => Math.abs(a.model.ask - 0.5) - Math.abs(b.model.ask - 0.5))[0];
   const floor = markets.find((m) => m.door === "hedge" && m.title.startsWith("H100") && m.kind === "put");
 
   // 1) buy 10 YES, signing the full transaction like Wallet Standard signTransaction
@@ -40,7 +40,7 @@ const api = async (p, body) => {
   catch (e) { console.log("replay rejected:", e.message); }
 
   // 4) a tampered transaction must fail
-  const q3 = await api("quote", { series: dig.id, side: "buy", qty: 1, owner });
+  const q3 = await api("quote", { series: dig.id, side: "buy", qty: 3, owner });
   const t3 = Transaction.from(Buffer.from(q3.tx, "base64"));
   t3.instructions[t3.instructions.length - 1].data[8] = 99; // change qty
   t3.partialSign(user);

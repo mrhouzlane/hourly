@@ -97,7 +97,7 @@ fn init_config(svm: &mut LiteSVM, who: &Keypair, usdc: Pubkey, treasury: Pubkey,
     let config = Pubkey::find_program_address(&[hourly::CONFIG_SEED], &hourly::id()).0;
     let ix = Instruction::new_with_bytes(
         hourly::id(),
-        &hourly::instruction::InitConfig { settler, oracle_queue: SB_QUEUE, fee_bps: 500 }.data(),
+        &hourly::instruction::InitConfig { settler, oracle_queue: SB_QUEUE, fee_bps: 500, lister: who.pubkey(), min_oracle_sigs: 1 }.data(),
         hourly::accounts::InitConfig { admin: who.pubkey(), config, quote_mint: usdc, treasury, system_program: SYSTEM }
             .to_account_metas(None),
     );
@@ -106,8 +106,11 @@ fn init_config(svm: &mut LiteSVM, who: &Keypair, usdc: Pubkey, treasury: Pubkey,
 
 /// SR-M1: init_config has no gate. Whoever lands it first after the program is
 /// deployed becomes admin, treasury, settler and picks the oracle queue.
+// FIXED for mainnet: builds with HOURLY_INIT_AUTHORITY=<deployer> reject any
+// other initialiser (compile-time, see docs/MAINNET.md). Dev and test builds
+// leave it open, which is what this test still shows.
 #[test]
-fn sr_m1_anyone_can_front_run_init_config() {
+fn sr_m1_dev_build_init_is_open_mainnet_build_is_gated() {
     let mut svm = fresh_svm();
     let attacker = Keypair::new();
     let team = Keypair::new();
@@ -129,8 +132,9 @@ fn sr_m1_anyone_can_front_run_init_config() {
 /// SR-H1: the vault quoter (a hot key on the venue server) sets `premium` with
 /// no bound. One vault_buy of a single $1 contract at a premium equal to the
 /// vault's cash moves every LP dollar to a colluding taker.
+// FIXED: vault_buy refuses a premium above 95% of max payoff (VaultPrice).
 #[test]
-fn sr_h1_quoter_drains_vault_with_unbounded_vault_buy_premium() {
+fn sr_h1_quoter_cannot_drain_vault_any_more() {
     let mut svm = fresh_svm();
     let admin = Keypair::new();
     let quoter = Keypair::new();
@@ -146,7 +150,7 @@ fn sr_h1_quoter_drains_vault_with_unbounded_vault_buy_premium() {
     // 1% fee, like the venue
     let ix = Instruction::new_with_bytes(
         hourly::id(),
-        &hourly::instruction::InitConfig { settler: admin.pubkey(), oracle_queue: SB_QUEUE, fee_bps: 100 }.data(),
+        &hourly::instruction::InitConfig { settler: admin.pubkey(), oracle_queue: SB_QUEUE, fee_bps: 100, lister: admin.pubkey(), min_oracle_sigs: 1 }.data(),
         hourly::accounts::InitConfig { admin: admin.pubkey(), config, quote_mint: usdc, treasury, system_program: SYSTEM }
             .to_account_metas(None),
     );
@@ -159,8 +163,8 @@ fn sr_h1_quoter_drains_vault_with_unbounded_vault_buy_premium() {
     let cash = Pubkey::find_program_address(&[hourly::LPV_CASH_SEED, vault.as_ref()], &hourly::id()).0;
     let ix = Instruction::new_with_bytes(
         hourly::id(),
-        &hourly::instruction::CreateVault { epoch, quoter: quoter.pubkey(), deposit_end: T0 + DAY, epoch_end: T0 + 8 * DAY, max_series_bps: 2_000 }.data(),
-        hourly::accounts::CreateVault { admin: admin.pubkey(), config, quote_mint: usdc, lp_vault: vault, share_mint: shares, cash, token_program: TOKEN, system_program: SYSTEM }
+        &hourly::instruction::CreateVault { epoch, quoter: quoter.pubkey(), deposit_end: T0 + DAY, epoch_end: T0 + 8 * DAY, max_series_bps: 2_000, max_epoch_bps: 5_000 }.data(),
+        hourly::accounts::CreateVault { lister: admin.pubkey(), config, quote_mint: usdc, lp_vault: vault, share_mint: shares, cash, token_program: TOKEN, system_program: SYSTEM }
             .to_account_metas(None),
     );
     send(&mut svm, &[ix], &admin, &[&admin]).unwrap();
@@ -188,7 +192,7 @@ fn sr_h1_quoter_drains_vault_with_unbounded_vault_buy_premium() {
     let ix = Instruction::new_with_bytes(
         hourly::id(),
         &hourly::instruction::CreateSeries { underlying: u, kind: KIND_DIGITAL, strike, cap, units, period_start: T0, expiry, feed_id: FEED }.data(),
-        hourly::accounts::CreateSeries { admin: admin.pubkey(), config, quote_mint: usdc, series, long_mint, vault: svault, token_program: TOKEN, system_program: SYSTEM }
+        hourly::accounts::CreateSeries { lister: admin.pubkey(), config, quote_mint: usdc, series, long_mint, vault: svault, token_program: TOKEN, system_program: SYSTEM }
             .to_account_metas(None),
     );
     send(&mut svm, &[ix], &admin, &[&admin]).unwrap();
@@ -210,7 +214,8 @@ fn sr_h1_quoter_drains_vault_with_unbounded_vault_buy_premium() {
         }
         .to_account_metas(None),
     );
-    send(&mut svm, &[ix], &admin, &[&admin, &quoter, &accomplice]).expect("unbounded premium accepted");
-    assert_eq!(balance(&svm, &aq), 990 * USD, "accomplice walks away with $990 for a contract worth at most $1");
-    assert!(balance(&svm, &cash) <= USD, "LP cash drained: {}", balance(&svm, &cash));
+    let r = send(&mut svm, &[ix], &admin, &[&admin, &quoter, &accomplice]);
+    assert!(r.as_ref().err().map_or(false, |e| e.contains("Custom(6021)")), "expected VaultPrice, got {:?}", r.err().map(|e| e[..e.len().min(200)].to_string()));
+    assert_eq!(balance(&svm, &aq), USD, "accomplice gets nothing");
+    assert_eq!(balance(&svm, &cash), 1_000 * USD, "LP cash intact");
 }

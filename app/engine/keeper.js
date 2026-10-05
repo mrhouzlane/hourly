@@ -11,11 +11,13 @@ const catalog = require("./catalog");
 
 const CROSSBAR_URL = process.env.CROSSBAR_URL || "https://crossbar.switchboardlabs.xyz";
 const FALLBACK_DELAY_S = 72 * 3600;
+const ORACLE_GRACE_S = 2 * 3600; // must match ORACLE_GRACE in the program
 const MAKER_FLOOR_USD = 2_000_000;
 // Weekly underwriting vaults. Epoch 1 trades the week starting Monday 5 Oct 2026.
 const EPOCH_BASE_S = Date.parse("2026-10-05T00:00:00Z") / 1000;
 const WEEK_S = 7 * 86400;
 const VAULT_CAP_BPS = 2_000; // at most 20% of a vault's deposits at risk in any one market
+const VAULT_EPOCH_BPS = 5_000; // at most 50% at risk across all markets in the epoch
 // the venue's own deposit, shown as such in the app; on mainnet the operator sets it explicitly
 const VENUE_SEED_USD = Number(process.env.VENUE_SEED_USD ?? (process.env.CLUSTER === "mainnet" ? 0 : 25_000));
 const MAKER_TOPUP_USD = 5_000_000;
@@ -34,6 +36,17 @@ async function switchboard() {
 
 const log = (...a) => console.log(new Date().toISOString(), "[keeper]", ...a);
 
+// Canonical form of a job list: url, JSONPath and aggregation (crossbar returns
+// the aggregation enum by name, we send it by number).
+const AGG = { 0: "NONE", 1: "MIN", 2: "MAX", 3: "SUM", 4: "MEAN", 5: "MEDIAN" };
+function canonJobs(jobs) {
+  if (!Array.isArray(jobs)) return null;
+  return JSON.stringify(jobs.map((j) => (j.tasks || []).map((t) =>
+    t.httpTask ? ["http", t.httpTask.url]
+      : t.jsonParseTask ? ["json", t.jsonParseTask.path, AGG[t.jsonParseTask.aggregationMethod] || t.jsonParseTask.aggregationMethod || "NONE"]
+        : ["other", JSON.stringify(t)])));
+}
+
 // Stores the feed definition with Switchboard (so anyone can fetch it by hash)
 // and returns its 32-byte id.
 async function feedIdFor(code, dates) {
@@ -43,6 +56,11 @@ async function feedIdFor(code, dates) {
   for (let i = 0; i < 4; i++) {
     try {
       const r = await crossbar.storeOracleFeed(feed);
+      // never trust the returned id blindly: fetch it back and compare the job
+      const back = await crossbar.fetchOracleFeed(r.feedId);
+      if (canonJobs(back && back.feed && back.feed.jobs) !== canonJobs(feed.jobs)) {
+        throw new Error(`crossbar feed ${r.feedId} does not match our definition`);
+      }
       return Buffer.from(r.feedId.replace(/^0x/, ""), "hex");
     } catch (e) { lastErr = e; await sleep(1500 * (i + 1)); }
   }
@@ -53,13 +71,13 @@ async function listOne(spec) {
   const quoteMint = new PublicKey(venue.state.quoteMint);
   const feedId = await feedIdFor(spec.underlying, spec.dates);
   const { ix, series } = chain.createSeries({
-    admin: venue.keys.admin.publicKey, quoteMint, underlying: spec.underlying, kind: spec.kind,
+    lister: venue.keys.lister.publicKey, quoteMint, underlying: spec.underlying, kind: spec.kind,
     strike: spec.strike, cap: spec.cap, units: spec.units, periodStart: spec.periodStart, expiry: spec.expiry, feedId,
   });
   const id = series.toBase58();
   if (venue.state.series[id]) return null;
   const existing = await venue.conn.getAccountInfo(series);
-  if (!existing) await venue.send([ix], []);
+  if (!existing) await venue.send([ix], [venue.keys.lister]);
   venue.state.series[id] = { ...spec, strike: spec.strike, cap: spec.cap, feedId: `0x${feedId.toString("hex")}` };
   venue.save();
   log("listed", spec.title, id);
@@ -108,13 +126,14 @@ async function settleOracle(s) {
   const meta = venue.state.series[s.pubkey.toBase58()];
   const feed = ornn.oracleFeed(s.underlying, meta.dates);
   // instructionIdx 0: the program checks the Ed25519 offsets point at index 0
-  const quoteIx = await queue.fetchQuoteIx(crossbar, [feed], { numSignatures: 1, instructionIdx: 0 });
+  const cfg = await venue.readConfig();
+  const quoteIx = await queue.fetchQuoteIx(crossbar, [feed], { numSignatures: cfg ? cfg.minOracleSigs : 1, instructionIdx: 0 });
   const settleIx = chain.settleOracle({ series: s.pubkey, queue: venue.ORACLE_QUEUE, quoteIxIndex: 0 });
   const tx = new Transaction().add(quoteIx, ...venue.computeIxs(400_000), settleIx);
-  tx.feePayer = venue.keys.admin.publicKey;
+  tx.feePayer = venue.keys.payer.publicKey;
   const { blockhash, lastValidBlockHeight } = await venue.conn.getLatestBlockhash("confirmed");
   tx.recentBlockhash = blockhash;
-  tx.sign(venue.keys.admin);
+  tx.sign(venue.keys.payer);
   const sig = await venue.conn.sendRawTransaction(tx.serialize(), { skipPreflight: false, maxRetries: 5 });
   const res = await venue.conn.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, "confirmed");
   if (res.value.err) throw new Error(`settle_oracle ${sig} failed: ${JSON.stringify(res.value.err)}`);
@@ -137,6 +156,8 @@ async function settleDue() {
   for (const s of list) {
     if (s.settled || nowS < Number(s.expiry)) continue;
     const id = s.pubkey.toBase58();
+    // oracle settlement opens ORACLE_GRACE after expiry so late prints are included
+    if (venue.IS_PUBLIC && nowS < Number(s.expiry) + ORACLE_GRACE_S) continue;
     let sig = null, how = null;
     if (!venue.IS_PUBLIC) {
       // preview chain: no Switchboard there; the preview build lets the backup key settle at expiry
@@ -189,9 +210,9 @@ async function ensureVaults() {
     const epochEnd = epochStart(n + 1);
     if (!(await venue.conn.getAccountInfo(pda))) {
       await venue.send([chain.createVault({
-        admin: venue.keys.admin.publicKey, quoteMint, epoch: n, quoter: venue.keys.maker.publicKey,
-        depositEnd, epochEnd, maxSeriesBps: VAULT_CAP_BPS,
-      })], []);
+        lister: venue.keys.lister.publicKey, quoteMint, epoch: n, quoter: venue.keys.maker.publicKey,
+        depositEnd, epochEnd, maxSeriesBps: VAULT_CAP_BPS, maxEpochBps: VAULT_EPOCH_BPS,
+      })], [venue.keys.lister]);
       log("vault created", n, pda.toBase58());
     }
     const v = venue.state.vaults[n] || { epoch: n, pubkey: pda.toBase58(), depositEnd, epochEnd, seeded: 0 };

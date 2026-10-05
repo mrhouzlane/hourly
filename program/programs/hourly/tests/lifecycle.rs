@@ -109,7 +109,7 @@ fn setup() -> Env {
     let treasury = token_account(&mut svm, &usdc, &admin.pubkey(), 0);
     let ix = Instruction::new_with_bytes(
         hourly::id(),
-        &hourly::instruction::InitConfig { settler: settler.pubkey(), oracle_queue: SB_QUEUE, fee_bps: FEE_BPS }.data(),
+        &hourly::instruction::InitConfig { settler: settler.pubkey(), oracle_queue: SB_QUEUE, fee_bps: FEE_BPS, lister: admin.pubkey(), min_oracle_sigs: 1 }.data(),
         hourly::accounts::InitConfig { admin: admin.pubkey(), config, quote_mint: usdc, treasury, system_program: SYSTEM }
             .to_account_metas(None),
     );
@@ -152,7 +152,7 @@ fn create_series(e: &mut Env, signer_is_admin: bool, kind: u8, strike: u64, cap:
         hourly::id(),
         &hourly::instruction::CreateSeries { underlying: u, kind, strike, cap, units, period_start: start, expiry, feed_id: FEED }.data(),
         hourly::accounts::CreateSeries {
-            admin: who.pubkey(),
+            lister: who.pubkey(),
             config: e.config,
             quote_mint: e.usdc,
             series,
@@ -482,9 +482,9 @@ fn create_vault(e: &mut Env, epoch: u32, quoter: Pubkey, deposit_end: i64, epoch
     let v = vault_pdas(e, epoch);
     let ix = Instruction::new_with_bytes(
         hourly::id(),
-        &hourly::instruction::CreateVault { epoch, quoter, deposit_end, epoch_end, max_series_bps: bps }.data(),
+        &hourly::instruction::CreateVault { epoch, quoter, deposit_end, epoch_end, max_series_bps: bps, max_epoch_bps: 5_000 }.data(),
         hourly::accounts::CreateVault {
-            admin: e.admin.pubkey(), config: e.config, quote_mint: e.usdc, lp_vault: v.vault,
+            lister: e.admin.pubkey(), config: e.config, quote_mint: e.usdc, lp_vault: v.vault,
             share_mint: v.shares, cash: v.cash, token_program: TOKEN, system_program: SYSTEM,
         }
         .to_account_metas(None),
@@ -617,7 +617,10 @@ fn vault_underwrites_an_epoch_and_pays_lps_pro_rata() {
     assert_eq!(balance(&e.svm, &tq), 100 * USD - 20 * USD - 200_000);
     assert_eq!(balance(&e.svm, &e.treasury), 200_000);
     // the cap: 20% of 400 = $80 of collateral in one series; 31 more would make 81
-    expect_code(vault_sell(&mut e, &v, &s, &quoter, &taker, tq, tl, 31, 0), "Custom(6017)"); // VaultLimit
+    expect_code(vault_sell(&mut e, &v, &s, &quoter, &taker, tq, tl, 31, 12 * USD), "Custom(6017)"); // VaultLimit
+    // and a giveaway price is refused on chain whoever signs it
+    expect_code(vault_sell(&mut e, &v, &s, &quoter, &taker, tq, tl, 1, 0), "Custom(6021)"); // VaultPrice
+    expect_code(vault_buy(&mut e, &v, &s, &quoter, &taker, tq, 1, 990 * USD), "Custom(6021)"); // VaultPrice
 
     // the vault also buys 10 contracts written by a second trader, at $0.30
     let t2 = Keypair::new();

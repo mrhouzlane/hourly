@@ -27,7 +27,7 @@ const api = async (p, body, ip) => {
       const side = m.door === "hedge" ? "buy" : (k % 2 ? "sell" : "buy");
       const s = Date.now();
       try {
-        const q = await api("quote", { owner: u.publicKey.toBase58(), legs: [{ series: m.id, side, qty: m.door === "hedge" ? 1 : 3 }] }, ip);
+        const q = await api("quote", { owner: u.publicKey.toBase58(), legs: [{ series: m.id, side, qty: m.door === "hedge" ? 1 : Math.max(3, Math.ceil(0.6 / Math.max(0.01, side === "buy" ? m.model.ask : m.model.bid))) }] }, ip);
         const tx = Transaction.from(Buffer.from(q.tx, "base64")); tx.partialSign(u);
         await api("submit", { id: q.id, tx: tx.serialize().toString("base64") }, ip);
         ok++; lat.push(Date.now() - s);

@@ -35,7 +35,8 @@ const ornn = require("../engine/ornn");
     await venue.send([chain.initConfig({
       admin: venue.keys.admin.publicKey, settler: venue.keys.settler.publicKey,
       oracleQueue: venue.ORACLE_QUEUE, quoteMint, treasury: new PublicKey(venue.state.treasury), feeBps: venue.state.feeBps,
-    })], []);
+      lister: venue.keys.lister.publicKey, minOracleSigs: Number(process.env.MIN_ORACLE_SIGS || 1),
+    })], [venue.keys.admin]);
     cfg = await venue.readConfig();
     console.log("config initialised");
   }

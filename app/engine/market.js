@@ -10,7 +10,30 @@ const { USD } = require("./catalog");
 
 const PRICE_TTL_MS = 60_000;
 const QUOTE_LIFETIME_S = 45;
-const LIMITS = { predict: { maxQty: 500, makerMaxShort: 20_000 }, hedge: { maxQty: 50, makerMaxShort: 2_000 } };
+const LIMITS = { predict: { maxQty: 500, makerMaxShort: 20_000, makerMaxLong: 20_000 }, hedge: { maxQty: 50, makerMaxShort: 2_000, makerMaxLong: 2_000 } };
+// Smallest trade the venue co-signs: stops rent farming with dust trades (the venue pays account rent).
+const MIN_PREMIUM_USD = 0.5;
+// New token accounts the venue will pay rent for, per wallet per day.
+const MAX_NEW_ACCOUNTS_PER_DAY = 12;
+const newAccounts = new Map(); // wallet -> { day, n }
+function chargeNewAccounts(user, n) {
+  const day = new Date().toISOString().slice(0, 10);
+  const k = user.toBase58();
+  const c = newAccounts.get(k);
+  const cur = c && c.day === day ? c.n : 0;
+  if (cur + n > MAX_NEW_ACCOUNTS_PER_DAY) throw venue.httpError(429, "Too many new positions from this wallet today.");
+  newAccounts.set(k, { day, n: cur + n });
+}
+// Ornn prints at 4pm New York (20:00 or 21:00 UTC). From 19:55 UTC until the
+// day's print is in our data, every market's price is about to move: no quotes.
+async function printPending(code) {
+  const now = new Date();
+  const minutes = now.getUTCHours() * 60 + now.getUTCMinutes();
+  if (minutes < 19 * 60 + 55) return false;
+  const today = now.toISOString().slice(0, 10);
+  const { points } = await ornn.get(code, { maxAgeMs: 120_000 });
+  return points[points.length - 1].date < today && minutes < 23 * 60 + 30;
+}
 
 let seriesCache = { at: 0, list: [] };
 const priceCache = new Map(); // series -> { at, price }
@@ -158,7 +181,7 @@ async function quote({ legs, seriesId, side, qty, owner }) {
   if (!Array.isArray(legs) || legs.length < 1 || legs.length > 2) throw venue.httpError(400, "one or two legs per quote");
   let user;
   try { user = new PublicKey(owner); } catch (_) { throw venue.httpError(400, "bad wallet address"); }
-  if (user.equals(venue.keys.maker.publicKey) || user.equals(venue.keys.admin.publicKey)) throw venue.httpError(400, "venue keys cannot trade");
+  if ([venue.keys.maker, venue.keys.admin, venue.keys.payer, venue.keys.lister].some((k) => user.equals(k.publicKey))) throw venue.httpError(400, "venue keys cannot trade");
   const list = await listSeries();
   const nowS = Math.floor(Date.now() / 1000);
   const quoteMint = new PublicKey(venue.state.quoteMint);
@@ -177,12 +200,14 @@ async function quote({ legs, seriesId, side, qty, owner }) {
     if (seen.has(leg.series)) throw venue.httpError(400, "two legs on the same market");
     seen.add(leg.series);
     if (s.settled || nowS >= tradingEnd(s)) throw venue.httpError(409, "Trading has closed on this market. The print is due.");
+    if (await printPending(s.underlying)) throw venue.httpError(409, "Prices refresh after today's 4pm New York print. Try again shortly.");
     const lim = LIMITS[s.meta.door];
     if (q > lim.maxQty) throw venue.httpError(400, `Maximum ${lim.maxQty} contracts per trade here.`);
     const p = await price(s);
     const unit = leg.side === "buy" ? p.ask : p.bid;
     if (leg.side === "sell" && unit <= 0) throw venue.httpError(409, "The desk has no bid on this contract right now.");
     const premiumAtoms = BigInt(Math.round(unit * q * USD));
+    if (Number(premiumAtoms) / USD < MIN_PREMIUM_USD) throw venue.httpError(400, `Minimum trade is $${MIN_PREMIUM_USD.toFixed(2)} of premium.`);
     const fee = feeOf(premiumAtoms);
     const per = BigInt(s.cap) * BigInt(s.units);
     const collateralAtoms = per * BigInt(q);
@@ -200,7 +225,7 @@ async function quote({ legs, seriesId, side, qty, owner }) {
       }
     }
     if (via === "vault") {
-      const args = { payer: venue.keys.admin.publicKey, quoter: maker, taker: user, epoch: v.epoch, series: s.pubkey, quoteMint, treasury, qty: q, premium: premiumAtoms, quoteExpiry: nowS + QUOTE_LIFETIME_S };
+      const args = { payer: venue.keys.payer.publicKey, quoter: maker, taker: user, epoch: v.epoch, series: s.pubkey, quoteMint, treasury, qty: q, premium: premiumAtoms, quoteExpiry: nowS + QUOTE_LIFETIME_S };
       if (leg.side === "buy") {
         ixs.push(venue.ataIx(chain.longMintPda(s.pubkey), user).ix);
         ixs.push(chain.vaultSell(args));
@@ -212,11 +237,15 @@ async function quote({ legs, seriesId, side, qty, owner }) {
         const makerPos = (await venue.positions(maker, [s.pubkey]))[s.pubkey.toBase58()] || 0n;
         if (makerPos + BigInt(q) > BigInt(lim.makerMaxShort)) throw venue.httpError(409, "The desk is at its risk limit on this market.");
       }
+      if (leg.side === "sell") {
+        const longs = (await venue.tokenBalances(maker, [chain.longMintPda(s.pubkey).toBase58()]))[chain.longMintPda(s.pubkey).toBase58()] || 0n;
+        if (longs + BigInt(q) > BigInt(lim.makerMaxLong)) throw venue.httpError(409, "The desk is at its risk limit on this market.");
+      }
       const buyer = leg.side === "buy" ? user : maker;
       const seller = leg.side === "buy" ? maker : user;
       ixs.push(venue.ataIx(chain.longMintPda(s.pubkey), buyer).ix);
       ixs.push(chain.fill({
-        payer: venue.keys.admin.publicKey, buyer, seller, series: s.pubkey, quoteMint, treasury,
+        payer: venue.keys.payer.publicKey, buyer, seller, series: s.pubkey, quoteMint, treasury,
         qty: q, premium: premiumAtoms, quoteExpiry: nowS + QUOTE_LIFETIME_S,
       }));
     }
@@ -244,6 +273,11 @@ async function quote({ legs, seriesId, side, qty, owner }) {
     legs: outLegs, pay: Number(payAtoms) / USD, fee: Number(feeAtoms) / USD, receive: Number(receiveAtoms) / USD, lock: Number(lockAtoms) / USD,
     premium: first.premium, collateral: first.collateral, user: user.toBase58(),
   };
+  // count accounts this transaction would create for the user (rent paid by the venue)
+  const wanted = [chain.ata(quoteMint, user), ...outLegs.filter((l) => l.side === "buy").map((l) => chain.ata(chain.longMintPda(l.series), user))];
+  const infos = await venue.conn.getMultipleAccountsInfo(wanted);
+  const fresh = infos.filter((a) => !a).length;
+  if (fresh) chargeNewAccounts(user, fresh);
   const prepared = await venue.prepareUserTx({ ixs, user, venueSigners: [venue.keys.maker], meta, units: 140_000 * outLegs.length + 40_000 });
   return { ...prepared, ...meta, expiresIn: QUOTE_LIFETIME_S };
 }

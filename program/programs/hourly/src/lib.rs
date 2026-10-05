@@ -30,6 +30,9 @@ fn no_randomness(_buf: &mut [u8]) -> core::result::Result<(), getrandom::Error> 
 #[cfg(target_os = "solana")]
 getrandom::register_custom_getrandom!(no_randomness);
 
+#[cfg(all(feature = "preview", not(feature = "devnet")))]
+compile_error!("the preview build is for the private demo chain only; build it with --features preview,devnet");
+
 pub const CONFIG_SEED: &[u8] = b"config";
 pub const SERIES_SEED: &[u8] = b"series";
 pub const LONG_SEED: &[u8] = b"long";
@@ -54,6 +57,13 @@ pub const SB_PROGRAM: Pubkey = switchboard_on_demand::ON_DEMAND_MAINNET_PID;
 pub const SLOT_HASHES_SYSVAR: Pubkey = pubkey!("SysvarS1otHashes111111111111111111111111111");
 pub const INSTRUCTIONS_SYSVAR: Pubkey = pubkey!("Sysvar1nstructions1111111111111111111111111");
 
+/// Vault price bounds: the quoter can never make the vault pay more than 95%
+/// of a contract's max payoff, nor sell one for less than 1% of it.
+pub const VAULT_MAX_BUY_BPS: u64 = 9_500;
+pub const VAULT_MIN_SELL_BPS: u64 = 100;
+/// Oracle settlement opens this long after expiry, so late prints are included.
+pub const ORACLE_GRACE: i64 = 2 * 3600;
+
 /// Protocol fee ceiling: 5% of premium.
 pub const MAX_FEE_BPS: u16 = 500;
 
@@ -72,13 +82,28 @@ const SB_TO_ATOMS: i128 = 1_000_000_000_000;
 pub mod hourly {
     use super::*;
 
-    pub fn init_config(ctx: Context<InitConfig>, settler: Pubkey, oracle_queue: Pubkey, fee_bps: u16) -> Result<()> {
+    pub fn init_config(
+        ctx: Context<InitConfig>,
+        settler: Pubkey,
+        oracle_queue: Pubkey,
+        fee_bps: u16,
+        lister: Pubkey,
+        min_oracle_sigs: u8,
+    ) -> Result<()> {
+        // Mainnet builds bake in the deployer so nobody can initialise first.
+        if let Some(auth) = option_env!("HOURLY_INIT_AUTHORITY") {
+            let expected: Pubkey = auth.parse().map_err(|_| error!(HourlyError::Unauthorized))?;
+            require_keys_eq!(ctx.accounts.admin.key(), expected, HourlyError::Unauthorized);
+        }
         require!(fee_bps <= MAX_FEE_BPS, HourlyError::BadTerms);
+        require!(min_oracle_sigs >= 1, HourlyError::BadTerms);
         let c = &mut ctx.accounts.config;
         c.treasury = ctx.accounts.treasury.key();
         c.fee_bps = fee_bps;
         c.admin = ctx.accounts.admin.key();
         c.settler = settler;
+        c.lister = lister;
+        c.min_oracle_sigs = min_oracle_sigs;
         c.oracle_queue = oracle_queue;
         c.quote_mint = ctx.accounts.quote_mint.key();
         c.bump = ctx.bumps.config;
@@ -94,6 +119,17 @@ pub mod hourly {
     /// redemption and withdrawals keep working so funds can always leave.
     pub fn set_paused(ctx: Context<AdminOnly>, paused: bool) -> Result<()> {
         ctx.accounts.config.paused = paused;
+        Ok(())
+    }
+
+    pub fn set_lister(ctx: Context<AdminOnly>, lister: Pubkey) -> Result<()> {
+        ctx.accounts.config.lister = lister;
+        Ok(())
+    }
+
+    pub fn set_min_oracle_sigs(ctx: Context<AdminOnly>, min_oracle_sigs: u8) -> Result<()> {
+        require!(min_oracle_sigs >= 1, HourlyError::BadTerms);
+        ctx.accounts.config.min_oracle_sigs = min_oracle_sigs;
         Ok(())
     }
 
@@ -299,7 +335,7 @@ pub mod hourly {
         let clock = Clock::get()?;
         let series = &ctx.accounts.series;
         require!(!series.settled, HourlyError::AlreadySettled);
-        require!(clock.unix_timestamp >= series.expiry, HourlyError::NotExpired);
+        require!(clock.unix_timestamp >= series.expiry + ORACLE_GRACE, HourlyError::NotExpired);
 
         let queue = ctx.accounts.queue.to_account_info();
         let slothashes = ctx.accounts.slothashes.to_account_info();
@@ -315,6 +351,11 @@ pub mod hourly {
             msg!("oracle quote rejected: {}", e);
             error!(HourlyError::OracleVerify)
         })?;
+        let mut sigs = 0u8;
+        while quote.oracle_index(sigs as usize).is_ok() {
+            sigs += 1;
+        }
+        require!(sigs >= ctx.accounts.config.min_oracle_sigs, HourlyError::OracleVerify);
         let feed = quote
             .feeds()
             .iter()
@@ -408,9 +449,11 @@ pub mod hourly {
         deposit_end: i64,
         epoch_end: i64,
         max_series_bps: u16,
+        max_epoch_bps: u16,
     ) -> Result<()> {
         require!(deposit_end < epoch_end, HourlyError::BadTerms);
         require!(max_series_bps > 0 && max_series_bps <= 10_000, HourlyError::BadTerms);
+        require!(max_epoch_bps >= max_series_bps && max_epoch_bps <= 10_000, HourlyError::BadTerms);
         let v = &mut ctx.accounts.lp_vault;
         v.config = ctx.accounts.config.key();
         v.epoch = epoch;
@@ -421,6 +464,8 @@ pub mod hourly {
         v.epoch_end = epoch_end;
         v.deposits = 0;
         v.max_series_bps = max_series_bps;
+        v.max_epoch_bps = max_epoch_bps;
+        v.at_risk = 0;
         v.open_series = 0;
         v.premiums = 0;
         v.bump = ctx.bumps.lp_vault;
@@ -478,6 +523,15 @@ pub mod hourly {
         let per = collateral_per_contract(s)?;
         let collateral = per.checked_mul(qty).ok_or(HourlyError::Overflow)?;
         let new_short = ctx.accounts.vault_series.short.checked_add(qty).ok_or(HourlyError::Overflow)?;
+        require!(
+            (premium as u128) * 10_000 >= (collateral as u128) * (VAULT_MIN_SELL_BPS as u128),
+            HourlyError::VaultPrice
+        );
+        let at_risk = v.at_risk.checked_add(collateral).ok_or(HourlyError::Overflow)?;
+        require!(
+            (at_risk as u128) * 10_000 <= (v.deposits as u128) * (v.max_epoch_bps as u128),
+            HourlyError::VaultLimit
+        );
         require!(
             (new_short as u128) * (per as u128) <= (v.deposits as u128) * (v.max_series_bps as u128) / 10_000,
             HourlyError::VaultLimit
@@ -565,6 +619,7 @@ pub mod hourly {
         s.open_interest = s.open_interest.checked_add(qty).ok_or(HourlyError::Overflow)?;
         let v = &mut ctx.accounts.lp_vault;
         v.premiums = v.premiums.checked_add(premium).ok_or(HourlyError::Overflow)?;
+        v.at_risk = at_risk;
         emit!(Filled { series: series_key, buyer: ctx.accounts.taker.key(), seller: lp_key, qty, premium, fee });
         Ok(())
     }
@@ -584,6 +639,16 @@ pub mod hourly {
         let per = collateral_per_contract(s)?;
         let collateral = per.checked_mul(qty).ok_or(HourlyError::Overflow)?;
         let new_long = ctx.accounts.vault_series.long.checked_add(qty).ok_or(HourlyError::Overflow)?;
+        require!(
+            (premium as u128) * 10_000 <= (collateral as u128) * (VAULT_MAX_BUY_BPS as u128),
+            HourlyError::VaultPrice
+        );
+        let spend = premium.checked_add(fee_for(premium, ctx.accounts.config.fee_bps)).ok_or(HourlyError::Overflow)?;
+        let at_risk = v.at_risk.checked_add(spend).ok_or(HourlyError::Overflow)?;
+        require!(
+            (at_risk as u128) * 10_000 <= (v.deposits as u128) * (v.max_epoch_bps as u128),
+            HourlyError::VaultLimit
+        );
         require!(
             (new_long as u128) * (per as u128) <= (v.deposits as u128) * (v.max_series_bps as u128) / 10_000,
             HourlyError::VaultLimit
@@ -668,6 +733,7 @@ pub mod hourly {
             ctx.accounts.lp_vault.open_series += 1;
         }
         vs.long = new_long;
+        ctx.accounts.lp_vault.at_risk = at_risk;
         let s = &mut ctx.accounts.series;
         s.open_interest = s.open_interest.checked_add(qty).ok_or(HourlyError::Overflow)?;
         emit!(Filled { series: series_key, buyer: lp_key, seller: taker_key, qty, premium, fee });
@@ -876,6 +942,8 @@ pub struct Config {
     pub treasury: Pubkey,
     pub fee_bps: u16,
     pub paused: bool,
+    pub lister: Pubkey,
+    pub min_oracle_sigs: u8,
     pub bump: u8,
 }
 
@@ -923,6 +991,8 @@ pub struct LpVault {
     pub epoch_end: i64,
     pub deposits: u64,
     pub max_series_bps: u16,
+    pub max_epoch_bps: u16,
+    pub at_risk: u64,
     pub open_series: u32,
     pub premiums: u64,
     pub bump: u8,
@@ -1001,6 +1071,8 @@ pub enum HourlyError {
     SeriesOutsideEpoch,
     #[msg("venue is paused")]
     Paused,
+    #[msg("vault trade price is outside the on-chain bounds")]
+    VaultPrice,
 }
 
 // ---------- accounts ----------
@@ -1028,13 +1100,13 @@ pub struct AdminOnly<'info> {
 #[instruction(underlying: [u8; 16], kind: u8, strike: u64, cap: u64, units: u64, period_start: i64, expiry: i64, feed_id: [u8; 32])]
 pub struct CreateSeries<'info> {
     #[account(mut)]
-    pub admin: Signer<'info>,
-    #[account(seeds = [CONFIG_SEED], bump = config.bump, has_one = admin @ HourlyError::Unauthorized, has_one = quote_mint)]
+    pub lister: Signer<'info>,
+    #[account(seeds = [CONFIG_SEED], bump = config.bump, has_one = lister @ HourlyError::Unauthorized, has_one = quote_mint)]
     pub config: Account<'info, Config>,
     pub quote_mint: Box<Account<'info, Mint>>,
     #[account(
         init,
-        payer = admin,
+        payer = lister,
         space = 8 + Series::INIT_SPACE,
         seeds = [
             SERIES_SEED,
@@ -1051,7 +1123,7 @@ pub struct CreateSeries<'info> {
     pub series: Box<Account<'info, Series>>,
     #[account(
         init,
-        payer = admin,
+        payer = lister,
         seeds = [LONG_SEED, series.key().as_ref()],
         bump,
         mint::decimals = 0,
@@ -1060,7 +1132,7 @@ pub struct CreateSeries<'info> {
     pub long_mint: Box<Account<'info, Mint>>,
     #[account(
         init,
-        payer = admin,
+        payer = lister,
         seeds = [VAULT_SEED, series.key().as_ref()],
         bump,
         token::mint = quote_mint,
@@ -1193,15 +1265,15 @@ pub struct Reclaim<'info> {
 #[instruction(epoch: u32)]
 pub struct CreateVault<'info> {
     #[account(mut)]
-    pub admin: Signer<'info>,
-    #[account(seeds = [CONFIG_SEED], bump = config.bump, has_one = admin @ HourlyError::Unauthorized, has_one = quote_mint)]
+    pub lister: Signer<'info>,
+    #[account(seeds = [CONFIG_SEED], bump = config.bump, has_one = lister @ HourlyError::Unauthorized, has_one = quote_mint)]
     pub config: Box<Account<'info, Config>>,
     pub quote_mint: Box<Account<'info, Mint>>,
-    #[account(init, payer = admin, space = 8 + LpVault::INIT_SPACE, seeds = [LPV_SEED, config.key().as_ref(), &epoch.to_le_bytes()], bump)]
+    #[account(init, payer = lister, space = 8 + LpVault::INIT_SPACE, seeds = [LPV_SEED, config.key().as_ref(), &epoch.to_le_bytes()], bump)]
     pub lp_vault: Box<Account<'info, LpVault>>,
-    #[account(init, payer = admin, seeds = [LPV_SHARES_SEED, lp_vault.key().as_ref()], bump, mint::decimals = 6, mint::authority = lp_vault)]
+    #[account(init, payer = lister, seeds = [LPV_SHARES_SEED, lp_vault.key().as_ref()], bump, mint::decimals = 6, mint::authority = lp_vault)]
     pub share_mint: Box<Account<'info, Mint>>,
-    #[account(init, payer = admin, seeds = [LPV_CASH_SEED, lp_vault.key().as_ref()], bump, token::mint = quote_mint, token::authority = lp_vault)]
+    #[account(init, payer = lister, seeds = [LPV_CASH_SEED, lp_vault.key().as_ref()], bump, token::mint = quote_mint, token::authority = lp_vault)]
     pub cash: Box<Account<'info, TokenAccount>>,
     pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,

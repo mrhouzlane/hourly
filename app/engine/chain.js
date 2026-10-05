@@ -92,16 +92,16 @@ const positionPda = (series, writer) =>
 const ata = (mint, owner) => getAssociatedTokenAddressSync(new PublicKey(mint), new PublicKey(owner), true);
 
 // ---------- instructions ----------
-function initConfig({ admin, settler, oracleQueue, quoteMint, treasury, feeBps }) {
+function initConfig({ admin, settler, oracleQueue, quoteMint, treasury, feeBps, lister, minOracleSigs }) {
   return buildIx("init_config",
     { admin, config: configPda(), quote_mint: quoteMint, treasury, system_program: SystemProgram.programId },
-    { settler, oracle_queue: oracleQueue, fee_bps: feeBps });
+    { settler, oracle_queue: oracleQueue, fee_bps: feeBps, lister, min_oracle_sigs: minOracleSigs });
 }
 
-function createSeries({ admin, quoteMint, underlying, kind, strike, cap, units, periodStart, expiry, feedId }) {
+function createSeries({ lister, quoteMint, underlying, kind, strike, cap, units, periodStart, expiry, feedId }) {
   const series = seriesPda({ underlying, kind, strike, cap, units, expiry });
   const ix = buildIx("create_series", {
-    admin, config: configPda(), quote_mint: quoteMint, series,
+    lister, config: configPda(), quote_mint: quoteMint, series,
     long_mint: longMintPda(series), vault: vaultPda(series),
     token_program: TOKEN_PROGRAM_ID, system_program: SystemProgram.programId,
   }, {
@@ -127,12 +127,12 @@ const cashPda = (vault) => find([Buffer.from("lpcash"), new PublicKey(vault).toB
 const vaultLongPda = (vault, series) => find([Buffer.from("lplong"), new PublicKey(vault).toBuffer(), new PublicKey(series).toBuffer()]);
 const vaultSeriesPda = (vault, series) => find([Buffer.from("lpseries"), new PublicKey(vault).toBuffer(), new PublicKey(series).toBuffer()]);
 
-function createVault({ admin, quoteMint, epoch, quoter, depositEnd, epochEnd, maxSeriesBps }) {
+function createVault({ lister, quoteMint, epoch, quoter, depositEnd, epochEnd, maxSeriesBps, maxEpochBps }) {
   const v = lpVaultPda(epoch);
   return buildIx("create_vault", {
-    admin, config: configPda(), quote_mint: quoteMint, lp_vault: v, share_mint: sharesPda(v), cash: cashPda(v),
+    lister, config: configPda(), quote_mint: quoteMint, lp_vault: v, share_mint: sharesPda(v), cash: cashPda(v),
     token_program: TOKEN_PROGRAM_ID, system_program: SystemProgram.programId,
-  }, { epoch, quoter, deposit_end: depositEnd, epoch_end: epochEnd, max_series_bps: maxSeriesBps });
+  }, { epoch, quoter, deposit_end: depositEnd, epoch_end: epochEnd, max_series_bps: maxSeriesBps, max_epoch_bps: maxEpochBps });
 }
 
 function vaultDeposit({ epoch, depositor, quoteMint, amount }) {
@@ -237,7 +237,7 @@ function checkDisc(buf, name) {
 
 function decodeConfig(buf) {
   const r = checkDisc(buf, "Config");
-  return { admin: r.pk(), settler: r.pk(), quoteMint: r.pk(), oracleQueue: r.pk(), treasury: r.pk(), feeBps: r.u16(), bump: r.u8() };
+  return { admin: r.pk(), settler: r.pk(), quoteMint: r.pk(), oracleQueue: r.pk(), treasury: r.pk(), feeBps: r.u16(), paused: r.bool(), lister: r.pk(), minOracleSigs: r.u8(), bump: r.u8() };
 }
 
 function decodeSeries(buf) {
@@ -267,7 +267,7 @@ function decodeLpVault(buf) {
   return {
     config: r.pk(), epoch: r.u32(), quoter: r.pk(), shareMint: r.pk(), cash: r.pk(),
     depositEnd: r.i64(), epochEnd: r.i64(), deposits: r.u64(), maxSeriesBps: r.u16(),
-    openSeries: r.u32(), premiums: r.u64(), bump: r.u8(),
+    maxEpochBps: r.u16(), atRisk: r.u64(), openSeries: r.u32(), premiums: r.u64(), bump: r.u8(),
   };
 }
 

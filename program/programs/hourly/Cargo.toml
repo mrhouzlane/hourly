@@ -10,7 +10,7 @@ crate-type = ["cdylib", "lib"]
 name = "hourly"
 
 [features]
-default = ["devnet"]
+default = []  # mainnet-safe: devnet and preview builds must be asked for explicitly
 # Switchboard devnet program and queue; build with --no-default-features for mainnet
 devnet = ["switchboard-on-demand/devnet"]
 cpi = ["no-entrypoint"]

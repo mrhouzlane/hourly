@@ -28,7 +28,8 @@ function allow(key, max, windowMs) {
 }
 setInterval(() => { const now = Date.now(); for (const [k, b] of buckets) if (now > b.reset) buckets.delete(k); }, 60_000).unref();
 
-const ipOf = (req) => (req.headers["x-forwarded-for"] || req.socket.remoteAddress || "").split(",")[0].trim();
+// Caddy appends the real client address as the LAST X-Forwarded-For hop; earlier hops are client-supplied.
+const ipOf = (req) => { const h = (req.headers["x-forwarded-for"] || "").split(",").map((x) => x.trim()).filter(Boolean); return h.length ? h[h.length - 1] : (req.socket.remoteAddress || ""); };
 
 // ---------- backtest off the main thread ----------
 let backtest = { at: null, result: null };
