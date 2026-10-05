@@ -18,7 +18,8 @@ Status: everything below marked BUILT is in the repo and tested. Items marked OP
 
 ```bash
 cd program
-cargo build-sbf --manifest-path programs/hourly/Cargo.toml --no-default-features --sbf-out-dir target/mainnet
+HOURLY_INIT_AUTHORITY=<deployer pubkey> cargo build-sbf --manifest-path programs/hourly/Cargo.toml --sbf-out-dir target/mainnet
+# default features = mainnet; only <deployer> can call init_config
 solana program deploy target/mainnet/hourly.so --program-id <mainnet-program-keypair> \
   --keypair <deployer> --url <paid-rpc>
 # then move upgrade authority to the multisig
@@ -35,7 +36,8 @@ Note: the program id is set by `declare_id!` in `lib.rs`. A new mainnet program 
 
 ```bash
 cd app
-CLUSTER=mainnet RPC_URL=<paid-rpc> KEYS_DIR=<mainnet-keys> VENUE_SEED_USD=0 node scripts/bootstrap.js
+CLUSTER=mainnet RPC_URL=<paid-rpc> KEYS_DIR=<mainnet-keys> VENUE_SEED_USD=0 MIN_ORACLE_SIGS=<n> node scripts/bootstrap.js
+# KEYS_DIR holds admin (init only, then hand config admin to the multisig), lister, payer, maker, settler
 # .env: CLUSTER=mainnet, RPC_URL=<paid-rpc>, KEYS_DIR=<mainnet-keys>, PORT=...
 ```
 
