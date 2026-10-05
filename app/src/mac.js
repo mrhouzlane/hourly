@@ -1,3 +1,4 @@
+import { char } from "./chars.mjs";
 // Hourly, System 7 edition. One decision per screen; the chart shows your
 // level and your date as you pick them. Bundled by esbuild into public/mac.js.
 import { getWallets } from "@wallet-standard/app";
@@ -357,6 +358,7 @@ function tradeView() {
       <div class="chartpane">
         <div class="quote"><span>${esc(gpuLabel(t.gpu))} rental, per hour</span><span class="px">${lastPrint(t.gpu) ? `$${lastPrint(t.gpu).toFixed(2)}` : ""}</span></div>
         <div class="chart" id="chart">${chartSvg()}</div>
+        <p class="read"><i>✦</i>${esc(readLine(t.gpu))}</p>
       </div>
     </div>`);
 }
@@ -1013,18 +1015,31 @@ function startFrom(gpu, side) {
   render();
   const w = $(".window"); if (w) w.scrollIntoView({ behavior: "smooth", block: "start" });
 }
+function crowdLean(code) {
+  const t = ((S.activity && S.activity.trades) || []).filter((x) => x.underlying === code);
+  const up = t.filter((x) => x.direction === "higher").reduce((n, x) => n + x.cost, 0), dn = t.filter((x) => x.direction === "lower").reduce((n, x) => n + x.cost, 0);
+  return { n: t.length, p: up + dn > 0 ? up / (up + dn) : null };
+}
+function readLine(code) {
+  const g = S.index.find((x) => x.code === code);
+  if (!g) return "";
+  const c = crowdLean(code);
+  const mv = `${g.chg7 >= 0 ? "up" : "down"} ${(Math.abs(g.chg7) * 100).toFixed(1)}% this week at $${g.last.toFixed(2)}`;
+  const lean = c.p === null ? "No one has called it yet." : `${pct(c.p >= 0.5 ? c.p : 1 - c.p)} of the money says ${c.p >= 0.5 ? "higher" : "lower"}.`;
+  return `${g.label} is ${mv}. ${lean}`;
+}
 function liveHtml() {
-  const a = S.activity, rows = a ? a.trades.slice(0, 14) : [];
-  const row = (x) => {
-    const can = x.door === "predict" && x.open;
-    return `<${can ? "button" : "div"} class="lrow" ${can ? `data-copy="${esc(x.series)}" data-side="${x.direction}" title="Copy this trade"` : ""}>
-      <span class="av" style="--hu:${hueOf(x.name)}">${esc(initials(x.name))}</span>
-      <span class="lt"><b>${esc(x.name)}</b><em>${esc(x.gpu)} <i class="${x.direction}">${x.direction === "higher" ? "▲ higher" : "▼ lower"}</i></em></span>
-      <span class="la">${usd(x.cost)}<small>${ago(x.at)}</small></span></${can ? "button" : "div"}>`;
-  };
-  return `<aside class="live"><div class="lh"><b><i class="ldot"></i>Live calls</b><button class="lall" data-view-go="activity">All</button></div>
-    <div class="lbody">${rows.length ? rows.map(row).join("") : '<p class="muted">No calls yet.</p>'}</div>
-    <div class="lf"><a class="xcta" href="${xShare("My call on AI chip rental prices, on Hourly.")}" target="_blank" rel="noopener">${XGLYPH}<span>Post your call</span></a></div></aside>`;
+  const a = S.activity, last = a && a.trades[0];
+  const rows = GPU_ORDER.filter((c) => S.index.find((x) => x.code === c)).map((c, i) => {
+    const l = crowdLean(c), g = S.index.find((x) => x.code === c);
+    const hi = l.p === null ? null : l.p >= 0.5;
+    return `<button class="crow2 ${S.t.gpu === c ? "on" : ""}" data-pick="${c}"><span class="rank">${i + 1}</span><span class="cav">${char(c)}</span>
+      <span class="ct"><b>${esc(g.label)}</b><em>${l.n ? `${l.n} call${l.n > 1 ? "s" : ""}` : "quiet"}</em></span>
+      <span class="cl ${hi === null ? "" : hi ? "up" : "dn"}">${l.p === null ? "–" : `${pct(hi ? l.p : 1 - l.p)}`}<small>${l.p === null ? "" : hi ? "higher" : "lower"}</small></span></button>`;
+  }).join("");
+  const lc = last ? `<div class="lastcall"><span class="lk">Latest call</span><p>${esc(last.sentence)}</p><div class="lr"><span class="dir ${last.direction}">${last.direction === "higher" ? "▲ Higher" : "▼ Lower"}</span>${last.door === "predict" && last.open ? `<button class="mini" data-copy="${esc(last.series)}" data-side="${last.direction}">Copy trade</button>` : ""}<a class="mini ghost" href="${xShare(`${last.headline}. Trading AI chip prices on Hourly.`)}" target="_blank" rel="noopener">${XGLYPH}</a></div></div>` : "";
+  return `<aside class="live"><div class="lh"><h3>What the crowd thinks</h3><button class="lall" data-view-go="activity">All calls</button></div>
+    <div class="lbody">${rows}</div>${lc}</aside>`;
 }
 function render() {
   const sub = () => `<div class="subtabs"><button data-sub="hedge" class="${S.view === "hedge" ? "on" : ""}">Protect</button><button data-sub="earn" class="${S.view === "earn" ? "on" : ""}">Earn</button></div>`;
@@ -1035,7 +1050,7 @@ function render() {
   ({ trade: bindTrade, chain: bindChain, hedge: bindHedge, earn: bindEarn, activity: bindActivity, portfolio: bindPortfolio })[S.view]();
   slidePill($(".steps"), "steps");
   $$("[data-view-go]").forEach((b) => b.addEventListener("click", () => { S.view = b.dataset.viewGo; renderMenu(); render(); }));
-  if (S.view === "trade") bindActivity();
+  if (S.view === "trade") { bindActivity(); $$("[data-pick]").forEach((b) => b.addEventListener("click", () => startFrom(b.dataset.pick, null))); }
   $$("[data-sub]").forEach((b) => b.addEventListener("click", () => { S.view = b.dataset.sub; renderMenu(); render(); }));
   $$("[data-sug]").forEach((b) => b.addEventListener("click", () => startFrom(b.dataset.sug, b.dataset.dir)));
   const go = $("#go"); if (go) go.addEventListener("click", () => startFrom(S.t.gpu, null));
