@@ -1107,3 +1107,32 @@ body { font-size: 17px; }
 .live .up, .live .dn { color: inherit !important; }
 .dir.higher, .dir.lower { color: inherit; }
 .tcard .dir.higher { color: #2f6bff; } .tcard .dir.lower { color: #0b1022; }
+
+/* v27: one hue. Everything is blue, from pale to deep. Ink is deep navy, not black. */
+:root { --ink: #0a1b52; --navy: #0c2166; --navy2: #14308f; --b50: #f4f7ff; --b100: #e6eeff; --b200: #cfdfff; --blue: #2f6bff; --up: #2f6bff; --dn: #14308f; --line: rgba(20, 48, 143, .12); }
+body { background: var(--b50); color: var(--ink); }
+.menubar { background: rgba(244,247,255,.85); }
+.menubar button.brand { color: var(--navy); }
+#wallet-btn, .go, .lf .xcta { background: var(--blue); } #wallet-btn:hover { background: var(--navy2); }
+.cta, .btn.default { background: var(--blue); } .cta:hover:not(:disabled), .btn.default:hover { background: var(--navy2); }
+.options.pm .opt.up { background: var(--blue); } .options.pm .opt.dn { background: var(--navy2); }
+.opt.row2.dn::before { background: rgba(20,48,143,.1); } .opt.row2 .ch small { background: var(--blue); } .opt.row2.dn .ch small { background: var(--navy2); }
+.opt.row2.hl { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(47,107,255,.16); }
+.up { color: var(--blue) !important; } .dn { color: var(--navy2) !important; }
+.asset .art, .sug { background: var(--b100); }
+.chartpane, .crowd { background: var(--navy); }
+.live { background: var(--navy); border-color: #1b3a9e; }
+.lastcall { background: #123099; border-color: #2448b8; }
+.crow2 .cl.up { color: #9dbcff !important; } .crow2 .cl.dn { color: #fff !important; }
+.lastcall .dir.higher { color: #9dbcff; }
+.crow2 .rank { -webkit-text-stroke-color: rgba(190,210,255,.4); } .crow2.on .rank { -webkit-text-stroke-color: #fff; }
+.crow2 .ct em, .lastcall .lk, .read { color: #b5c9ff; }
+.mini { color: var(--navy); }
+.dialog .icon, .titlebar span.tt, .hint { color: #5a6fb0; }
+.lt i.lower { color: var(--navy2); }
+.tcard .dir.lower { color: var(--navy2); }
+.meter span, .cbar i { background: var(--blue); }
+.steps button.done i { background: var(--navy); }
+.chart .lvlbox { fill: var(--blue); }
+.hero .sub, .panel .lead { color: #4a5f9e; }
+.subtabs button.on { color: var(--blue); }
