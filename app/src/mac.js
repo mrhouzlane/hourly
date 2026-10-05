@@ -977,10 +977,42 @@ function aboutBox() {
 // ---------- render ----------
 function heroHtml() {
   const gs = GPU_ORDER.map((c) => S.index.find((x) => x.code === c)).filter(Boolean);
-  return `<header class="hero"><div class="herorow">
-    <div class="herotext"><h1>Bet on the price<br>of <span class="grad">AI chips.</span></h1>
-    <p class="sub">Will renting an H100 cost more or less tomorrow?<br>Pick a side. Get paid if you're right.</p></div>
-    ${mascot("big")}</div></header>${gs.length ? assetsHtml() : ""}`;
+  const sug = [["H100_SXM", "higher"], ["H200", "higher"], ["B200", "lower"], ["A100_SXM4", "lower"]]
+    .filter(([c]) => S.index.find((x) => x.code === c))
+    .map(([c, d]) => `<button class="sug" data-sug="${c}" data-dir="${d}">${esc(gpuLabel(c))}<em>${d === "higher" ? "↑ higher" : "↓ lower"}</em></button>`).join("");
+  return `<header class="hero">
+    ${mascot("big")}
+    <h1>Bet on the price of <span class="serif">AI chips.</span></h1>
+    <p class="sub">Will renting an H100 cost more or less tomorrow? Pick a side. Get paid if you're right.</p>
+    <div class="composer"><div class="cline"><span id="cq"></span><i class="caret"></i></div>
+      <div class="crow"><div class="sugs">${sug}</div><button class="go" id="go" aria-label="Start">→</button></div></div>
+  </header>${gs.length ? assetsHtml() : ""}`;
+}
+let tyTok = 0;
+function typeLoop() {
+  const el = $("#cq");
+  if (!el) return;
+  const tok = ++tyTok;
+  const qs = GPU_ORDER.map((c) => S.index.find((x) => x.code === c)).filter(Boolean)
+    .map((g) => `Will ${g.label} rent for more than $${g.last.toFixed(2)} an hour tomorrow?`);
+  if (!qs.length) return;
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) { el.textContent = qs[0]; return; }
+  let q = 0, i = 0, dir = 1;
+  const tick = () => {
+    if (tok !== tyTok || !document.body.contains(el)) return;
+    const txt = qs[q % qs.length];
+    i += dir;
+    el.textContent = txt.slice(0, i);
+    if (i >= txt.length) { dir = -1; return setTimeout(tick, 2200); }
+    if (i <= 0) { dir = 1; q++; return setTimeout(tick, 350); }
+    setTimeout(tick, dir > 0 ? 38 : 16);
+  };
+  tick();
+}
+function startFrom(gpu, side) {
+  S.t = { ...S.t, gpu, step: side ? 2 : 1, side: side || null, strike: null, seriesId: null, quote: null, hl: 0, dir: "back" };
+  render();
+  const w = $(".window"); if (w) w.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 function render() {
   const views = { trade: tradeView, chain: chainView, hedge: hedgeView, earn: earnView, activity: activityView, portfolio: portfolioView };
@@ -988,6 +1020,9 @@ function render() {
   $$("[data-home]").forEach((b) => b.addEventListener("click", () => { S.view = "trade"; renderMenu(); render(); }));
   ({ trade: bindTrade, chain: bindChain, hedge: bindHedge, earn: bindEarn, activity: bindActivity, portfolio: bindPortfolio })[S.view]();
   slidePill($(".steps"), "steps");
+  typeLoop();
+  $$("[data-sug]").forEach((b) => b.addEventListener("click", () => startFrom(b.dataset.sug, b.dataset.dir)));
+  const go = $("#go"); if (go) go.addEventListener("click", () => startFrom(S.t.gpu, null));
   $$("[data-asset]").forEach((b) => b.addEventListener("click", () => {
     S.t = { ...S.t, gpu: b.dataset.asset, step: 1, side: null, strike: null, seriesId: null, quote: null, hl: 0, dir: "back" };
     render(); const w = $(".window"); if (w) w.scrollIntoView({ behavior: "smooth", block: "start" });
