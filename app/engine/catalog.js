@@ -69,23 +69,22 @@ function monthly(code, monthStart, kind, strike, width) {
 }
 
 // Initial and rolling listings, given the latest print per GPU.
+// Prediction markets: for every GPU, the next three daily prints and the next
+// Friday print, each with five strikes around the last print (ATM +/- 2 steps).
 function predictListings(lastByCode, fromDate) {
   const out = [];
-  // next three daily prints for H100, the benchmark chip
-  const h = lastByCode.H100_SXM;
-  if (h) {
-    for (let i = 1; i <= 3; i++) {
-      const date = addDays(fromDate, i);
-      out.push(digital("H100_SXM", date, roundTo(h, STEP.H100_SXM)));
-    }
-  }
-  // next Friday print for every GPU, two strikes around the last print
   const d = new Date(`${fromDate}T00:00:00Z`);
   const toFri = (5 - d.getUTCDay() + 7) % 7 || 7;
-  const friday = addDays(fromDate, toFri);
+  const dates = new Set([1, 2, 3].map((i) => addDays(fromDate, i)));
+  dates.add(addDays(fromDate, toFri));
   for (const [code, last] of Object.entries(lastByCode)) {
     const atm = roundTo(last, STEP[code]);
-    for (const k of [atm, atm + STEP[code]]) out.push(digital(code, friday, Number(k.toFixed(2))));
+    for (const date of dates) {
+      for (const k of [-2, -1, 0, 1, 2]) {
+        const strike = Number((atm + k * STEP[code]).toFixed(2));
+        if (strike > 0) out.push(digital(code, date, strike));
+      }
+    }
   }
   return out;
 }

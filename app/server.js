@@ -10,6 +10,7 @@ const ornn = require("./engine/ornn");
 const model = require("./engine/model");
 const market = require("./engine/market");
 const keeper = require("./engine/keeper");
+const feed = require("./engine/feed");
 
 const PORT = Number(process.env.PORT || 7988);
 const PUBLIC = path.join(__dirname, "public");
@@ -139,6 +140,7 @@ const routes = {
   },
 
   "GET /api/index": async () => indexSummary(),
+  "GET /api/activity": async () => feed.build(),
   "GET /api/markets": async () => market.markets(),
 
   "GET /api/portfolio": async (req, url) => market.portfolio(url.searchParams.get("owner")),
@@ -179,8 +181,11 @@ const routes = {
     if (!allow(`s:${ip}`, 30, 60_000)) throw venue.httpError(429, "Too many submissions. Wait a minute.");
     const r = await venue.submitUserTx({ id: body.id, tx: body.tx, signature: body.signature });
     if (r.meta.kind === "fill") {
-      for (const l of r.meta.legs || []) venue.state.fills.push({ tx: r.signature, at: new Date().toISOString(), series: l.series, side: l.side, qty: l.qty, price: l.price, title: l.title });
-      venue.state.fills = venue.state.fills.slice(-500);
+      for (const l of r.meta.legs || []) venue.state.fills.push({
+        tx: r.signature, at: new Date().toISOString(), user: r.meta.user, series: l.series, side: l.side,
+        qty: l.qty, price: l.price, premium: l.premium, fee: l.fee || 0, collateral: l.collateral || 0, via: l.via, title: l.title,
+      });
+      venue.state.fills = venue.state.fills.slice(-5000);
       venue.save();
     }
     log("submitted", r.meta.kind, r.meta.series, r.signature);

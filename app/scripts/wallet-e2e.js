@@ -43,54 +43,55 @@ const SHOTS = process.env.SHOTS || "/home/mehdi_quantum3labs_com/compute-options
   }, { address: kp.publicKey.toBase58(), pk: Array.from(kp.publicKey.toBytes()) });
 
   const step = async (name, fn) => { try { await fn(); console.log("PASS", name); } catch (e) { console.log("FAIL", name, e.message.split("\n")[0]); } };
+  const okDialog = async () => { await page.waitForSelector(".modal .btn.default", { timeout: 60000 }); const t = await page.textContent(".modal"); await page.click(".modal .btn.default"); return t; };
   await page.goto(BASE, { waitUntil: "networkidle" });
-  await page.evaluate(() => document.querySelectorAll(".rise").forEach((e) => e.classList.add("in")));
-
   await step("wallet appears in picker and connects", async () => {
-    await page.click("#connect");
+    await page.click("#wallet-btn");
     await page.waitForSelector("[data-w]", { timeout: 5000 });
     await page.click("[data-w]");
-    await page.waitForFunction((a) => document.querySelector("#connect").textContent.startsWith(a.slice(0, 4)), kp.publicKey.toBase58(), { timeout: 5000 });
+    await page.waitForFunction((a) => document.querySelector("#wallet-btn").textContent.startsWith(a.slice(0, 4)), kp.publicKey.toBase58(), { timeout: 5000 });
   });
-  const trade = async (selector, label) => step(label, async () => {
-    await page.click(selector);
-    await page.waitForFunction(() => !document.querySelector("#go").disabled, null, { timeout: 20000 });
-    await page.click("#go");
-    await page.waitForFunction(() => /Done|err/.test(document.querySelector("#t-status").textContent + " " + document.querySelector("#t-status").className), null, { timeout: 60000 });
-    const t = await page.textContent("#t-status");
+  const wizard = (side, label) => step(label, async () => {
+    await page.click('#menubar [data-view="trade"]');
+    await page.click(`[data-opt="${side}"]`);
+    await page.click("[data-opt]");            // first level
+    await page.click("[data-opt]");            // first date
+    await page.fill("#amt", "6");
+    await page.click("#to-review");
+    await page.waitForFunction(() => document.querySelector("#sign") && !document.querySelector("#sign").disabled, null, { timeout: 20000 });
+    await page.click("#sign");
+    const t = await okDialog();
     if (!/Done/.test(t)) throw new Error(t);
-    await page.click("#go");
   });
-  await trade("[data-trade][data-side=yes]", "buy YES via wallet signature");
-  await trade("[data-trade][data-side=no]", "write NO via wallet signature");
+  await wizard("higher", "wizard: higher via wallet signature");
+  await wizard("lower", "wizard: lower via wallet signature");
   await step("hedge collar via wallet", async () => {
-    await page.click(".switch button[data-door=hedge]");
+    await page.click('#menubar [data-view="hedge"]');
     await page.check("#collar");
     await page.click("#hedge-go");
-    await page.waitForFunction(() => !document.querySelector("#go").disabled, null, { timeout: 20000 });
-    await page.click("#go");
-    await page.waitForFunction(() => /Done|err/.test(document.querySelector("#t-status").textContent + " " + document.querySelector("#t-status").className), null, { timeout: 60000 });
-    const t = await page.textContent("#t-status"); if (!/Done/.test(t)) throw new Error(t);
-    await page.click("#go");
+    await page.waitForSelector(".modal #ok", { timeout: 20000 });
+    await page.click(".modal #ok");
+    const t = await okDialog(); if (!/Protected/.test(t)) throw new Error(t);
   });
   await step("vault deposit via wallet", async () => {
-    await page.click(".switch button[data-door=earn]");
-    await page.fill("#dep-amt", "100");
+    await page.click('#menubar [data-view="earn"]');
+    await page.fill("#dep", "100");
     await page.click("#dep-go");
-    await page.waitForFunction(() => /Deposited|err/.test(document.querySelector("#dep-status").textContent + " " + document.querySelector("#dep-status").className), null, { timeout: 60000 });
-    const t = await page.textContent("#dep-status"); if (!/Deposited/.test(t)) throw new Error(t);
+    const t = await okDialog(); if (!/Deposited/.test(t)) throw new Error(t);
   });
   await step("portfolio shows positions and vault", async () => {
+    await page.click('#menubar [data-view="portfolio"]');
     await page.waitForTimeout(1500);
-    const txt = await page.textContent("#portfolio-body");
-    if (!/Long/.test(txt) || !/Short/.test(txt) || !/Vault/.test(txt)) throw new Error(txt.slice(0, 200));
+    const txt = await page.textContent("#desk");
+    if (!/long/.test(txt) || !/short/.test(txt) || !/Vault/.test(txt)) throw new Error(txt.slice(0, 200));
   });
-  await step("close long against short via wallet", async () => {
-    await page.click("[data-act=close]");
-    await page.waitForFunction(() => /Done|err/.test(document.querySelector("#pf-status").textContent + " " + document.querySelector("#pf-status").className), null, { timeout: 60000 });
-    const t = await page.textContent("#pf-status"); if (!/Done/.test(t)) throw new Error(t);
+  await step("activity shows this wallet's trades", async () => {
+    await page.click('#menubar [data-view="activity"]');
+    await page.waitForTimeout(800);
+    const txt = await page.textContent("#desk");
+    if (!/put \$/.test(txt)) throw new Error("no trade sentences");
   });
-  await (await page.$("#portfolio")).screenshot({ path: `${SHOTS}/wallet-portfolio.png` });
+  await page.click('#menubar [data-view="portfolio"]'); await page.waitForTimeout(800); await page.screenshot({ path: `${SHOTS}/wallet-portfolio.png`, fullPage: true });
   console.log("signatures by chain:", JSON.stringify(signed));
   console.log(errors.length ? "page errors: " + errors.join(" | ") : "no page errors");
   await browser.close();
