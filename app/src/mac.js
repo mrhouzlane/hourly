@@ -3,7 +3,6 @@
 import { getWallets } from "@wallet-standard/app";
 import nacl from "tweetnacl";
 import bs58 from "bs58";
-import { createSolanaClient } from "@metamask/connect-solana";
 
 // ---------- utils ----------
 const $ = (s, el = document) => el.querySelector(s);
@@ -68,6 +67,7 @@ async function registerMetaMask() {
   const net = S.status && S.status.cluster;
   if (!["devnet", "mainnet"].includes(net)) return;
   try {
+    const { createSolanaClient } = await import("@metamask/connect-solana");
     await createSolanaClient({
       dapp: { name: "Hourly", url: location.origin },
       api: { supportedNetworks: { [net]: net === "mainnet" ? "https://api.mainnet-beta.solana.com" : "https://api.devnet.solana.com" } },
@@ -264,8 +264,8 @@ function zoom(fromEl, toEl) {
 // Specs are the public vendor figures (architecture, memory); prices come live from the index.
 const CHIPS = {
   H100_SXM: { maker: "NVIDIA", arch: "Hopper", mem: "80GB HBM3", tag: "The workhorse of the AI boom", uses: ["Training", "Inference"], hue: "#2f6bff", hbm: 3, dies: 1 },
-  H200: { maker: "NVIDIA", arch: "Hopper", mem: "141GB HBM3e", tag: "More memory for bigger models", uses: ["LLM serving", "Long context"], hue: "#27a8ff", hbm: 3, dies: 1 },
-  B200: { maker: "NVIDIA", arch: "Blackwell", mem: "192GB HBM3e", tag: "The new frontier-model chip", uses: ["Frontier training", "Reasoning"], hue: "#8a6bff", hbm: 4, dies: 2 },
+  H200: { maker: "NVIDIA", arch: "Hopper", mem: "141GB HBM3e", tag: "More memory for bigger models", uses: ["LLM serving", "Long context"], hue: "#4d8dff", hbm: 3, dies: 1 },
+  B200: { maker: "NVIDIA", arch: "Blackwell", mem: "192GB HBM3e", tag: "The new frontier-model chip", uses: ["Frontier training", "Reasoning"], hue: "#18b6ff", hbm: 4, dies: 2 },
   A100_SXM4: { maker: "NVIDIA", arch: "Ampere", mem: "80GB HBM2e", tag: "The veteran, now the cheap tier", uses: ["Fine-tuning", "Batch jobs"], hue: "#7f95c9", hbm: 3, dies: 1 },
 };
 function chipArt(code, big) {
@@ -1020,12 +1020,22 @@ async function refreshPortfolio() { if (!S.wallet) { S.portfolio = null; return;
 async function refreshActivity() { try { S.activity = await api("activity"); } catch (_) { /* keep */ } }
 
 (async function main() {
-  try { S.status = await api("status"); } catch (_) { /* offline */ }
-  registerMetaMask();
-  try { S.index = await api("index"); } catch (_) { S.index = []; }
-  await Promise.all([refreshMarkets(), refreshActivity()]);
-  renderMenu();
-  render();
+  // paint from the last visit right away, then refresh everything in parallel
+  try {
+    const c = JSON.parse(store.get("hourly.boot") || "null");
+    if (c && c.index && c.index.length) { Object.assign(S, { status: c.status, index: c.index, markets: c.markets || [], vaults: c.vaults || [], activity: c.activity }); renderMenu(); render(); }
+  } catch (_) { /* stale cache is optional */ }
+  const [st, ix, mk, vl, ac] = await Promise.all([
+    api("status").catch(() => null), api("index").catch(() => null), api("markets").catch(() => null), api("vaults").catch(() => []), api("activity").catch(() => null),
+  ]);
+  if (st) S.status = st;
+  S.index = ix || S.index || [];
+  if (mk) S.markets = mk;
+  S.vaults = vl || S.vaults;
+  if (ac) S.activity = ac;
+  if (!document.querySelector(".modal") && !(S.view === "trade" && S.t.step >= 4)) { renderMenu(); render(); }
+  store.set("hourly.boot", JSON.stringify({ status: S.status, index: S.index, markets: S.markets, vaults: S.vaults, activity: S.activity }));
+  (window.requestIdleCallback || setTimeout)(() => registerMetaMask());
   await restoreWallet();
   setInterval(async () => {
     if (document.querySelector(".modal") || (S.view === "trade" && S.t.step >= 4)) return;

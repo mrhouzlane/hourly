@@ -71,13 +71,17 @@ async function indexSummary() {
 }
 
 // ---------- http plumbing ----------
+const zlib = require("zlib");
+const gz = new Map(); // static file cache: path -> { mtime, buf }
 function send(res, status, body, headers = {}) {
-  const data = typeof body === "string" || Buffer.isBuffer(body) ? body : JSON.stringify(body);
-  res.writeHead(status, {
+  let data = typeof body === "string" || Buffer.isBuffer(body) ? body : JSON.stringify(body);
+  const h = {
     "content-type": typeof body === "object" && !Buffer.isBuffer(body) ? "application/json; charset=utf-8" : "text/plain; charset=utf-8",
     "cache-control": "no-store",
     ...headers,
-  });
+  };
+  if (res.__gzip && data.length > 1024) { data = zlib.gzipSync(data, { level: 6 }); h["content-encoding"] = "gzip"; h.vary = "accept-encoding"; }
+  res.writeHead(status, h);
   res.end(data);
 }
 
@@ -107,8 +111,15 @@ function serveStatic(req, res, urlPath) {
       return send(res, 404, "not found");
     }
     const ext = path.extname(file);
-    res.writeHead(200, { "content-type": MIME[ext] || "application/octet-stream", "cache-control": ext === ".html" ? "no-cache" : "public, max-age=300" });
-    res.end(data);
+    const h = { "content-type": MIME[ext] || "application/octet-stream", "cache-control": ext === ".html" ? "no-cache" : "public, max-age=300" };
+    let out = data;
+    if (res.__gzip && [".js", ".css", ".html", ".svg", ".json", ".ttf"].includes(ext)) {
+      const key = `${file}:${data.length}`;
+      if (!gz.has(key)) gz.set(key, zlib.gzipSync(data, { level: 9 }));
+      out = gz.get(key); h["content-encoding"] = "gzip"; h.vary = "accept-encoding";
+    }
+    res.writeHead(200, h);
+    res.end(out);
   });
 }
 
@@ -206,6 +217,7 @@ const routes = {
 };
 
 const server = http.createServer(async (req, res) => {
+  res.__gzip = /\bgzip\b/.test(String(req.headers["accept-encoding"] || ""));
   const url = new URL(req.url, "http://localhost");
   const key = `${req.method} ${url.pathname}`;
   const handler = routes[key];

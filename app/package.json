@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "build": "esbuild src/mac.js --bundle --minify --format=iife --target=es2019 --outfile=public/mac.js && esbuild src/client.js --bundle --minify --format=iife --target=es2019 --outfile=public/app.js",
+    "build": "esbuild src/mac.js --bundle --minify --splitting --format=esm --target=es2020 --outdir=public/m && esbuild src/client.js --bundle --minify --format=iife --target=es2019 --outfile=public/app.js",
     "start": "node server.js",
     "e2e": "node scripts/e2e.js"
   },
