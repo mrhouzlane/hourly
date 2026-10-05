@@ -670,3 +670,17 @@ h2.big { font-family: var(--text); font-weight: 800; font-size: clamp(28px, 4vw,
 .fnode b { font-size: 18px; margin-top: 8px; }
 .fnode p { font-size: 12.5px; }
 .orb { width: 56px; height: 56px; border-radius: 17px; } .orb svg { width: 28px; height: 28px; }
+
+/* ======== v11: pipeline as a flat strip, no bubbles ======== */
+.flow { padding: 0; background: none; border: 0; border-radius: 0; backdrop-filter: none; box-shadow: none; overflow: visible; }
+.flow::before, .rail, .pk { display: none; }
+.fnodes { gap: 0; border-top: 2px solid #fff; }
+.fnode { padding: 18px 20px 4px 0; position: relative; counter-increment: st; border-right: 1px solid rgba(160,190,255,.3); margin-right: 20px; }
+.fnode:last-child { border-right: 0; margin-right: 0; }
+.fnode::before { content: ""; position: absolute; top: -6px; left: 0; width: 10px; height: 10px; background: #fff; animation: lit2 5.4s steps(1) infinite; animation-delay: calc(var(--i) * 1.35s); }
+@keyframes lit2 { 0%, 24%, 100% { background: #fff; } 8% { background: #6fa0ff; box-shadow: 0 0 14px #6fa0ff; } }
+.orb { width: 28px; height: 28px; border-radius: 0; background: none; box-shadow: none; animation: none; color: #9fc0ff; margin-bottom: 6px; }
+.orb svg { width: 28px; height: 28px; }
+.fnode b { font-size: 17px; margin-top: 0; }
+.fnode p { color: #aebfe8; }
+@media (max-width: 960px) { .fnode { border-right: 0; margin-right: 0; padding-bottom: 14px; } .fnodes { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
