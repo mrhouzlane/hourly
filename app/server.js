@@ -129,6 +129,7 @@ const routes = {
       maker: venue.keys.maker.publicKey.toBase58(),
       fallbackDelayHours: 72,
       // chain id wallets sign for; null hides external wallets (private preview chain)
+      xHandle: process.env.X_HANDLE || null,
       walletChain: process.env.WALLET_CHAIN || (venue.IS_PUBLIC ? `solana:${venue.CLUSTER}` : null),
       feeBps: venue.state.feeBps,
       treasury: venue.state.treasury,

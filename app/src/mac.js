@@ -882,36 +882,45 @@ function bindEarn() {
 
 // ---------- activity ----------
 const initials = (n) => n.split(/[_.]/).slice(0, 2).map((x) => x[0] || "").join("").toUpperCase();
+const XGLYPH = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M18.9 2H22l-7.2 8.2L23 22h-6.6l-5.2-6.8L5.3 22H2.2l7.7-8.8L1.5 2h6.8l4.7 6.2L18.9 2z"/></svg>';
+const xShare = (text) => `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(location.origin + location.pathname)}`;
+const hueOf = (name) => { let h = 0; for (const c of name) h = (h * 31 + c.charCodeAt(0)) % 360; return h; };
 function activityView() {
   const a = S.activity;
   if (!a) return windowShell("Activity", '<div class="wbody">Loading.</div>');
   const st = a.stats[S.feedWin];
   const hi = st.higherPct;
-  return windowShell("What everyone is trading", `
+  const test = a.cluster !== "devnet" && a.cluster !== "mainnet";
+  const xh = S.status && S.status.xHandle;
+  // the crowd: which way each chip is leaning, from real fills
+  const crowd = GPU_ORDER.map((code) => {
+    const t = a.trades.filter((x) => x.underlying === code);
+    const up = t.filter((x) => x.direction === "higher").reduce((n, x) => n + x.cost, 0), dn = t.filter((x) => x.direction === "lower").reduce((n, x) => n + x.cost, 0);
+    return { code, n: t.length, p: up + dn > 0 ? up / (up + dn) : null };
+  });
+  const card = (x) => {
+    const said = x.sentence.startsWith(x.name) ? x.sentence.slice(x.name.length + 1) : x.sentence;
+    const post = `${x.headline}. I'm in for ${usd(x.cost)} on Hourly, trading the price of AI compute.`;
+    return `<article class="tcard"><header><span class="av" style="--hu:${hueOf(x.name)}">${esc(initials(x.name))}</span><div><b>${esc(x.name)}</b><span>@${esc(x.name.replace(/\./g, "_"))} · ${ago(x.at)}</span></div>
+      <a class="xs" href="${xShare(post)}" target="_blank" rel="noopener" title="Share on X" aria-label="Share on X">${XGLYPH}</a></header>
+      <p>${esc(said)}</p>
+      <footer><span class="dir ${x.direction}">${x.direction === "higher" ? "▲ higher" : "▼ lower"}</span><span class="amt">${usd(x.cost)}</span>${x.door === "predict" && x.open ? `<button class="btn" data-copy="${esc(x.series)}" data-side="${x.direction}">Copy trade</button>` : ""}</footer></article>`;
+  };
+  return windowShell("The wall", `
+    <div class="crowd">${crowd.map((c) => `<div class="cw"><div class="cwh"><b>${esc(gpuLabel(c.code))}</b><span>${c.n ? (c.p >= .5 ? `${pct(c.p)} higher` : `${pct(1 - c.p)} lower`) : "quiet"}</span></div>
+      <div class="cbar ${c.p === null ? "idle" : ""}"><i style="width:${c.p === null ? 0 : Math.round(c.p * 100)}%"></i></div></div>`).join("")}</div>
     <div class="feed">
-      <div>
-        ${a.cluster !== "devnet" && a.cluster !== "mainnet" ? '<p class="small">Preview chain: these include our own test trades.</p>' : ""}
-        ${a.trades.length ? a.trades.slice(0, 20).map((x) => `<div class="post"><div class="av">${esc(initials(x.name))}</div><div>
-          <div class="who"><span>${esc(x.name)}</span><span>${ago(x.at)}</span></div>
-          <div>${esc(x.sentence.startsWith(x.name) ? x.sentence.slice(x.name.length + 1) : x.sentence)}</div>
-          <div class="card"><span>${esc(x.headline)}</span><span class="row">${usd(x.cost)}${x.door === "predict" && x.open ? ` <button class="btn" data-copy="${esc(x.series)}" data-side="${x.direction}">Copy</button>` : ""}</span></div>
-        </div></div>`).join("") : "<p>No trades yet. Be the first.</p>"}
-      </div>
-      <div>
-        <h3>Happening now</h3>
+      <div class="wall">${a.trades.length ? a.trades.slice(0, 12).map(card).join("") : "<p>No calls yet. Be the first.</p>"}
+        ${test ? '<p class="small muted">Test chain: includes our own test trades.</p>' : ""}</div>
+      <aside>
         <div class="seg">${["1h", "24h", "7d"].map((w) => `<button data-fw="${w}" class="${w === S.feedWin ? "on" : ""}">${w}</button>`).join("")}</div>
-        <div class="stats">
-          <div class="stat"><div class="n">${st.bets}</div><div class="small">bets</div></div>
-          <div class="stat"><div class="n">${usd(st.onTable, 0)}</div><div class="small">on the table</div></div>
-          <div class="stat"><div class="n">${st.traders}</div><div class="small">traders</div></div>
-          <div class="stat"><div class="n">${hi === null ? "none" : pct(hi)}</div><div class="small">say higher</div></div>
-        </div>
+        <div class="trio"><div><b>${st.bets}</b><span>calls</span></div><div><b>${usd(st.onTable, 0)}</b><span>on the line</span></div><div><b>${st.traders}</b><span>traders</span></div></div>
         ${hi !== null ? `<div class="meter"><span style="width:${Math.round(hi * 100)}%"></span></div><div class="small row" style="justify-content:space-between"><span>${pct(hi)} higher</span><span>${pct(1 - hi)} lower</span></div>` : ""}
-        <h3>Hot today</h3>
-        <div class="list">${a.hot.length ? a.hot.map((p) => `<div><span>${esc(p.name)}</span><span>${p.pnl >= 0 ? "+" : ""}${usd(p.pnl)}</span></div>`).join("") : "<div><span>Nobody yet today.</span></div>"}</div>
-        <h3>Top profit, 7 days</h3>
-        <div class="list">${a.leaders.length ? a.leaders.map((p) => `<div><span>${esc(p.name)}</span><span>${p.pnl >= 0 ? "+" : ""}${usd(p.pnl)}, ${p.trades} trades</span></div>`).join("") : "<div><span>Nobody yet.</span></div>"}</div>
-      </div>
+        <h3>Sharp money</h3>
+        <div class="list">${a.leaders.length ? a.leaders.slice(0, 5).map((p, i) => `<div><span><i class="rk">${i + 1}</i>${esc(p.name)}</span><span>${p.pnl >= 0 ? "+" : ""}${usd(p.pnl)}</span></div>`).join("") : "<div><span>Nobody yet.</span></div>"}</div>
+        <a class="xcta" href="${xShare("My call on AI chip rental prices, on Hourly.")}" target="_blank" rel="noopener">${XGLYPH}<span>Post your call on X</span></a>
+        ${xh ? `<a class="xcta ghost" href="https://x.com/${esc(xh)}" target="_blank" rel="noopener">${XGLYPH}<span>Follow @${esc(xh)}</span></a>` : ""}
+      </aside>
     </div>`);
 }
 function bindActivity() {
