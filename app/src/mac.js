@@ -221,7 +221,6 @@ function renderMenu() {
     ${[["trade", "Trade"], ["chain", "Chain"], ["hedge", "Hedge"], ["earn", "Earn"], ["activity", "Activity"], ["portfolio", "Portfolio"]]
       .map(([k, t]) => `<button data-view="${k}" class="${S.view === k ? "on" : ""}">${t}</button>`).join("")}
     <span class="spacer"></span>
-    <span class="ticker">${g ? `H100 <b>$${g.last.toFixed(2)}</b>/hr` : ""}</span>
     <button id="wallet-btn">${S.wallet ? `${S.wallet.address.slice(0, 4)}…${S.wallet.address.slice(-4)}` : "Connect"}</button>`;
   slidePill($("#menubar"), "menu");
   $$("#menubar [data-view]").forEach((b) => b.addEventListener("click", () => {
@@ -237,7 +236,7 @@ function renderMenu() {
 }
 
 function windowShell(title, body) {
-  return `<section class="window"><div class="titlebar"><span class="tt"><i class="dot"></i>HOURLY / ${esc(title).toUpperCase()}</span><span class="live"><i></i>LIVE</span></div>${body}</section>`;
+  return `<section class="window"><div class="titlebar"><span class="tt"><i class="dot"></i>HOURLY / ${esc(title).toUpperCase()}</span></div>${body}</section>`;
 }
 
 // ---------- classic zoom rectangles (Finder open/close motion) ----------
@@ -300,7 +299,7 @@ function assetsHtml() {
     const k = CHIPS[g.code] || {};
     return `<button class="asset ${S.t.gpu === g.code ? "on" : ""}" data-asset="${g.code}" style="--h:${k.hue || "#2f6bff"}">
       <div class="art">${chipArt(g.code, true)}</div>
-      <div class="ah"><b>${esc(g.label)}</b><span>${esc(k.arch || "")} · ${esc(k.mem || "")}</span></div>
+      <div class="ah"><b>${esc(g.label)}</b></div>
       <div class="ap"><span class="pr">$${g.last.toFixed(2)}<small>/hr</small></span><em class="${g.chg7 >= 0 ? "up" : "dn"}">${g.chg7 >= 0 ? "▲" : "▼"} ${(Math.abs(g.chg7) * 100).toFixed(1)}%</em></div></button>`;
   }).join("");
   return `<section class="assets"><div class="agrid">${cards}</div></section>`;
@@ -357,10 +356,9 @@ function tradeView() {
         <div class="quote"><span>${esc(gpuLabel(t.gpu))} rental, per hour</span><span class="px">${lastPrint(t.gpu) ? `$${lastPrint(t.gpu).toFixed(2)}` : ""}</span></div>
         <div class="rng">${[[7, "1W"], [30, "1M"], [90, "3M"]].map(([n, l]) => `<button data-rng="${n}" class="${(t.range || 30) === n ? "on" : ""}">${l}</button>`).join("")}</div>
         <div class="chart" id="chart">${chartSvg()}</div>
-        <div class="small muted">${chartCaption()}</div>
       </div>
     </div>
-    <div class="hint"><span><kbd>↑</kbd> <kbd>↓</kbd> choose</span><span><kbd>Enter</kbd> pick</span><span><kbd>Esc</kbd> back</span><span class="spacer"></span><span>Settled by oracle on Ornn's 4pm New York print</span></div>`);
+    <div class="hint"><span>Settled by oracle on Ornn's 4pm New York print</span></div>`);
 }
 
 function optionsList() {
@@ -375,26 +373,25 @@ function stepHtml() {
   const t = S.t, g = gpuLabel(t.gpu);
   if (t.step === 1) {
     const sides = [
-      { key: "higher", glyph: "▲", t: `${g} rents higher`, s: "than a price you pick, on a day you pick" },
-      { key: "lower", glyph: "▼", t: `${g} rents lower`, s: "than a price you pick, on a day you pick" },
+      { key: "higher", glyph: "▲", t: `${g} rents higher`, s: "" },
+      { key: "lower", glyph: "▼", t: `${g} rents lower`, s: "" },
     ];
     return `<h2>Pick your side</h2>
-      <div class="seg gpu-pick">${GPU_ORDER.filter((c) => levelsFor(c).length).map((c) => `<button data-gpu="${c}" class="${c === t.gpu ? "on" : ""}">${esc(gpuLabel(c))}</button>`).join("")}</div>
       <div class="options">${sides.map((o, i) => `<button class="opt ${i === t.hl ? "hl" : ""}" data-opt="${o.key}"><span class="glyph">${o.glyph}</span><span><div class="t">${esc(o.t)}</div><div class="s">${o.s}</div></span><span></span></button>`).join("")}</div>`;
   }
   if (t.step === 2) {
     const ks = levelsFor(t.gpu);
-    return `<h2>Pick your level</h2><p class="lead small">${g} last printed $${(lastPrint(t.gpu) || 0).toFixed(2)}. You win if it ends ${t.side === "higher" ? "above" : "at or below"} your level.</p>
+    return `<h2>Pick your level</h2>
       <div class="options">${ks.map((k, i) => {
         const m = seriesNear(t.gpu, k);
         const ch = m ? sideChance(m, t.side) : 0;
-        return `<button class="opt ${i === t.hl ? "hl" : ""}" data-opt="${k}"><span class="glyph">$</span><span><div class="t">${t.side === "higher" ? "Above" : "At or below"} $${k.toFixed(2)}</div><div class="s">${pct(ch)} chance on ${m ? day(m.windowEnd) : ""}<span class="bar1"><span style="width:${Math.round(ch * 100)}%"></span></span></div></span><span class="r">${m ? cents(sideUnit(m, t.side)) : ""}<small>per $1</small></span></button>`;
+        return `<button class="opt ${i === t.hl ? "hl" : ""}" data-opt="${k}"><span class="glyph">$</span><span><div class="t">${t.side === "higher" ? "Above" : "At or below"} $${k.toFixed(2)}</div><div class="s">${pct(ch)} chance</div></span><span class="r">${m ? cents(sideUnit(m, t.side)) : ""}<small>per $1</small></span></button>`;
       }).join("")}</div>`;
   }
   if (t.step === 3) {
     const ms = datesFor(t.gpu, t.strike);
-    return `<h2>Pick your date</h2><p class="lead small">The 4pm New York print on that day decides it.</p>
-      <div class="options">${ms.map((m, i) => `<button class="opt ${i === t.hl ? "hl" : ""}" data-opt="${m.id}"><span class="glyph">◷</span><span><div class="t">${day(m.windowEnd)}</div><div class="s">${pct(sideChance(m, t.side))} chance · trading closes in ${countdown(m.tradingEnd)}</div></span><span class="r">${cents(sideUnit(m, t.side))}<small>per $1</small></span></button>`).join("")}</div>`;
+    return `<h2>Pick your date</h2>
+      <div class="options">${ms.map((m, i) => `<button class="opt ${i === t.hl ? "hl" : ""}" data-opt="${m.id}"><span class="glyph">◷</span><span><div class="t">${day(m.windowEnd)}</div><div class="s">${pct(sideChance(m, t.side))} chance</div></span><span class="r">${cents(sideUnit(m, t.side))}<small>per $1</small></span></button>`).join("")}</div>`;
   }
   const m = S.markets.find((x) => x.id === t.seriesId);
   if (!m) return "<p>That market just closed. Pick another date.</p>";
@@ -402,22 +399,13 @@ function stepHtml() {
   const qty = Math.max(0, Math.floor(t.amount / (unit * (t.side === "higher" ? 1.01 : 1))));
   const verb = t.side === "higher" ? "above" : "at or below";
   if (t.step === 4) {
-    const ch = sideChance(m, t.side);
-    const R = 38, C = 2 * Math.PI * R;
-    return `<h2>How much?</h2><p class="lead small">${g} ${verb} $${m.strike.toFixed(2)} on ${day(m.windowEnd)}, at ${cents(unit)} per $1.</p>
+    return `<h2>How much?</h2><p class="lead small">${g} ${verb} $${m.strike.toFixed(2)} on ${day(m.windowEnd)}</p>
       <div class="amtcard">
-        <div class="cap">YOU PUT IN</div>
         <div class="amount"><span>$</span><input id="amt" inputmode="decimal" value="${t.amount}" aria-label="Amount in USDC"></div>
-        <input type="range" class="slider" id="sl" min="1" max="250" step="1" value="${Math.min(250, Math.max(1, t.amount))}" aria-label="Amount slider">
         <div class="chips">${[5, 20, 50, 100].map((v) => `<button class="pillchip ${t.amount === v ? "on" : ""}" data-amt="${v}">$${v}</button>`).join("")}</div>
       </div>
-      <div class="ticket">
-        <div class="tk win"><div class="cap">IF YOU'RE RIGHT YOU GET</div><div class="winnum" id="win" data-v="${qty}">${usd(qty)}</div><div class="mult" id="mult"></div></div>
-        <div class="tk gauge"><svg viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="${R}" class="gt"/><circle cx="50" cy="50" r="${R}" class="gv" id="gv" stroke-dasharray="${C.toFixed(1)}" stroke-dashoffset="${C.toFixed(1)}" data-c="${C.toFixed(1)}" data-p="${ch}"/></svg><div class="gn"><b>${pct(ch)}</b><span>CHANCE</span></div></div>
-        <div class="tk small2"><div class="cap">CONTRACTS</div><b id="qty" data-v="${qty}">${qty}</b></div>
-        <div class="tk small2"><div class="cap">AT RISK</div><b id="risk" data-v="0">$0.00</b></div>
-        <div class="tk race"><div class="rt"><span>RISK</span><span>REWARD</span></div><div class="rbar"><i id="rr"></i></div></div>
-      </div>
+      <div class="payline"><span>You get if right</span><b id="win" data-v="${qty}">${usd(qty)}</b></div>
+      <div class="payline soft"><span>Chance</span><b>${pct(sideChance(m, t.side))}</b></div>
       <button class="cta" id="to-review" ${qty > 0 ? "" : "disabled"}><span>Review</span><i>→</i></button>`;
   }
   // step 5: review
@@ -569,28 +557,20 @@ function previewHover() {
 function bindAmount() {
   const input = $("#amt");
   if (!input) return;
-  const update = (src) => {
+  const update = () => {
     S.t.amount = Math.max(0, Number(input.value) || 0);
     const m = S.markets.find((x) => x.id === S.t.seriesId);
     if (!m) return;
-    const unit = sideUnit(m, S.t.side), fee = S.t.side === "higher" ? 1.01 : 1;
-    const qty = Math.max(0, Math.floor(S.t.amount / (unit * fee)));
-    const risk = qty * unit * fee;
-    tween($("#win"), qty, usd); tween($("#qty"), qty, (v) => String(Math.round(v))); tween($("#risk"), risk, usd);
-    $("#mult").textContent = risk > 0 ? `${(qty / risk).toFixed(1)}x your money` : "";
-    $("#rr").style.width = `${qty > 0 ? Math.max(4, Math.min(100, (risk / qty) * 100)) : 0}%`;
+    const qty = Math.max(0, Math.floor(S.t.amount / (sideUnit(m, S.t.side) * (S.t.side === "higher" ? 1.01 : 1))));
+    tween($("#win"), qty, usd);
     $("#to-review").disabled = qty <= 0;
-    if (src !== "sl") $("#sl").value = Math.min(250, Math.max(1, S.t.amount));
-    $("#sl").style.setProperty("--f", `${(Math.min(250, Math.max(1, S.t.amount)) / 250) * 100}%`);
     $$("[data-amt]").forEach((b) => b.classList.toggle("on", Number(b.dataset.amt) === S.t.amount));
   };
-  input.addEventListener("input", () => update("in"));
+  input.addEventListener("input", update);
   input.addEventListener("keydown", (e) => { if (e.key === "Enter" && !$("#to-review").disabled) { e.preventDefault(); $("#to-review").click(); } });
-  $("#sl").addEventListener("input", (e) => { input.value = e.target.value; update("sl"); });
   $$("[data-amt]").forEach((b) => b.addEventListener("click", () => { input.value = b.dataset.amt; update(); }));
   $("#to-review").addEventListener("click", (e) => ensureWallet(() => goStep(5, e.target)));
-  const gv = $("#gv"); requestAnimationFrame(() => requestAnimationFrame(() => { gv.style.strokeDashoffset = Number(gv.dataset.c) * (1 - Number(gv.dataset.p)); }));
-  $("#win").dataset.v = 0; $("#qty").dataset.v = 0; $("#risk").dataset.v = 0;
+  $("#win").dataset.v = 0;
   update();
   input.focus(); input.select();
 }
@@ -997,12 +977,12 @@ function heroHtml() {
   return `<header class="hero">
     <div class="heromark">${mascot("big")}</div>
     <h1>Trade the price<br>of <span class="grad">AI compute.</span></h1>
-    <p class="sub">Bet on what AI chips cost to rent, or lock in your own bill. Fully backed, settled on Solana.</p>
+    <p class="sub">Bet on what AI chips cost to rent.</p>
   </header>${gs.length ? assetsHtml() : ""}`;
 }
 function render() {
   const views = { trade: tradeView, chain: chainView, hedge: hedgeView, earn: earnView, activity: activityView, portfolio: portfolioView };
-  $("#desk").innerHTML = (S.view === "trade" ? heroHtml() : "") + views[S.view]() + (S.view === "trade" ? explainHtml() : "");
+  $("#desk").innerHTML = (S.view === "trade" ? heroHtml() : "") + views[S.view]();
   $$("[data-home]").forEach((b) => b.addEventListener("click", () => { S.view = "trade"; renderMenu(); render(); }));
   ({ trade: bindTrade, chain: bindChain, hedge: bindHedge, earn: bindEarn, activity: bindActivity, portfolio: bindPortfolio })[S.view]();
   slidePill($(".steps"), "steps");

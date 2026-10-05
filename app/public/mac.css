@@ -734,3 +734,48 @@ h2.big { font-family: var(--text); font-weight: 800; font-size: clamp(28px, 4vw,
 .skel i { display: block; height: 110px; border-radius: 6px; background: linear-gradient(100deg, rgba(255,255,255,.06) 30%, rgba(255,255,255,.2) 50%, rgba(255,255,255,.06) 70%) 0 0 / 220% 100%; animation: shimmer 1.2s linear infinite; }
 .skel i:first-child { height: 220px; }
 @keyframes shimmer { to { background-position: -220% 0; } }
+
+/* ======== v15: simpler ======== */
+.payline { display: flex; justify-content: space-between; align-items: baseline; padding: 12px 0; border-bottom: 1px solid var(--hair); }
+.payline span { color: var(--soft); }
+.payline b { font-family: var(--text); font-weight: 800; font-size: 34px; letter-spacing: -.04em; }
+.payline.soft b { font-size: 18px; }
+.cta { margin-top: 18px; }
+.opt .s:empty { display: none; }
+.hero .sub { font-size: 20px; }
+.asset .ah b { font-size: 24px; }
+.hint { justify-content: center; }
+.panel h2 { margin-bottom: 16px; } .lead:empty { display: none; }
+
+/* ======== v16: bring the white back: light glass over a blue-to-white sky ======== */
+body { position: relative; background: #eaf0ff; }
+.bg { position: absolute; inset: 0 0 auto 0; height: 100%; min-height: 100vh;
+  background: linear-gradient(180deg, #123fd0 0, #2f6bff 22%, #7fa6ff 48%, #cfdeff 74%, #f3f6ff 100%); }
+.bg i:nth-child(1) { background: #5b8cff; opacity: .6; }
+.bg i:nth-child(2) { background: #6fd0ff; opacity: .45; }
+.bg i:nth-child(3) { background: #ffffff; opacity: .55; bottom: 4%; }
+.bg b { background: linear-gradient(rgba(255,255,255,.22) 1px, transparent 1px) 0 0 / 56px 56px, linear-gradient(90deg, rgba(255,255,255,.22) 1px, transparent 1px) 0 0 / 56px 56px; }
+#net { position: fixed; }
+body::before { position: absolute; background: repeating-conic-gradient(rgba(255,255,255,.12) 0 25%, transparent 0 50%) 0 0 / 4px 4px; }
+
+.menubar { background: rgba(255,255,255,.62); box-shadow: 0 0 0 1px rgba(255,255,255,.8), 0 14px 40px rgba(20,60,200,.28), inset 0 1px 0 #fff; }
+.menubar button { color: #26335f; }
+.menubar button:hover { color: var(--ink); }
+.menubar button.on { color: #fff; }
+.menubar .pill { background: linear-gradient(#4f86ff, #2457e6); }
+#wallet-btn { background: var(--ink); color: #fff; box-shadow: 0 6px 18px rgba(10,20,80,.35); }
+#wallet-btn:hover { background: var(--blue-d); color: #fff; }
+
+.window { background: rgba(255,255,255,.74); backdrop-filter: blur(26px) saturate(1.7); -webkit-backdrop-filter: blur(26px) saturate(1.7);
+  box-shadow: 0 0 0 2px var(--ink), 7px 7px 0 rgba(20, 50, 170, .45), 0 30px 70px rgba(30,70,200,.28); }
+.window::before { display: block; background: linear-gradient(158deg, #fff 0, rgba(255,255,255,0) 36%); }
+.titlebar { background: rgba(255,255,255,.55); }
+.steps { background: rgba(255,255,255,.5); }
+.panel { background: transparent; }
+.amtcard, .opt, .tcard, .stat { background: rgba(255,255,255,.9); }
+.feed aside { background: rgba(240,245,255,.7); }
+.asset { background: rgba(255,255,255,.92); box-shadow: 5px 5px 0 rgba(20,50,170,.5); }
+.asset:hover { box-shadow: 9px 9px 0 rgba(20,50,170,.5); }
+.hint { background: rgba(255,255,255,.5); }
+.ladder { background: rgba(255,255,255,.85); }
+body { display: flow-root; }
