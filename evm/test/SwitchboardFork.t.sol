@@ -77,7 +77,7 @@ abstract contract SwitchboardForkBase is Base {
         (taker, takerKey) = makeAddrAndKey("taker");
         usdc = new MockUSDC();
         oracle = new SwitchboardSettlementOracle(ISwitchboardOnDemand(address(live)), 1 hours);
-        hourly = new Hourly(usdc, admin, treasury, settler, oracle, FEE_BPS);
+        hourly = new Hourly(usdc, admin, treasury, settler, oracle, FEE_BPS, admin);
     }
 
     /// Flip the low byte of the int128 value (bytes 50..65 after an 18-byte header + 32-byte feed id).

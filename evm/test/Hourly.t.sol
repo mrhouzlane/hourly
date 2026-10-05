@@ -207,7 +207,7 @@ contract HourlyTest is Base {
         vm.expectRevert(Hourly.SelfTrade.selector);
         hourly.fill(q, sig);
         // seller lacks collateral: 11 contracts need $11 (Solana: SPL insufficient funds)
-        q = quote(s, maker, true, 11, 0, T0 + 30);
+        q = quote(s, maker, true, 11, USD / 2, T0 + 30);
         sig = sign(makerKey, q);
         vm.prank(taker);
         vm.expectRevert(
@@ -322,7 +322,7 @@ contract HourlyTest is Base {
         vm.prank(maker);
         vm.expectRevert(Hourly.Unauthorized.selector); // only admin
         hourly.setPaused(true);
-        fillSell(s, makerKey, taker, 2, 0, T0 + 30); // a position exists before the pause
+        fillSell(s, makerKey, taker, 2, USD / 2, T0 + 30); // a position exists before the pause
         vm.prank(admin);
         hourly.setPaused(true);
         Hourly.Quote memory q = quote(s, maker, true, 1, 0, T0 + 30);
@@ -349,7 +349,7 @@ contract HourlyTest is Base {
 
     function test_fee_cap_and_admin() public {
         vm.expectRevert(Hourly.BadTerms.selector);
-        new Hourly(usdc, admin, treasury, settler, oracle, 501);
+        new Hourly(usdc, admin, treasury, settler, oracle, 501, admin);
         vm.prank(admin);
         vm.expectRevert(Hourly.BadTerms.selector);
         hourly.setFee(501);
@@ -468,7 +468,7 @@ contract HourlyTest is Base {
 
     function test_no_oracle_deployment_settles_only_through_backup_after_72h() public {
         NoOracle none = new NoOracle();
-        Hourly h = new Hourly(usdc, admin, treasury, settler, none, FEE_BPS);
+        Hourly h = new Hourly(usdc, admin, treasury, settler, none, FEE_BPS, admin);
         vm.prank(admin);
         uint256 s = h.createSeries(H100, DIGITAL, 2_700_000, uint64(USD), 1, T0, T0 + DAY, FEED);
         vm.warp(T0 + DAY);
@@ -559,7 +559,7 @@ contract HourlyTest is Base {
         cap = uint64(bound(cap, 1, kind == PUT ? strike : 100 * USD));
         units = uint16(bound(units, 1, kind == DIGITAL ? 1 : 744));
         qty = uint16(bound(qty, 1, 1_000));
-        premium = uint64(bound(premium, 0, 1_000_000 * USD));
+        premium = uint64(bound(premium, 10_000, 1_000_000 * USD));
         price = uint64(bound(price, 0, 200 * USD));
         uint64 expiry = T0 + 7 * DAY;
         uint256 s = createSeries(kind, strike, cap, units, T0, expiry);

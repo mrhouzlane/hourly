@@ -55,6 +55,11 @@ contract ChainlinkFunctionsSettlementOracle is ISettlementOracle, FunctionsClien
     /// Longest window accepted, in dates (keeps the request far below 30 KB).
     uint256 public constant MAX_DATES = 62;
 
+    /// Requests allowed per series, answered or not. Requests are paid in LINK
+    /// by the subscription, so a permissionless caller must not be able to loop
+    /// them. After this many the series settles through the fallback settler.
+    uint8 public constant MAX_ATTEMPTS = 3;
+
     address public immutable deployer;
     bytes32 public immutable donId;
     uint64 public immutable subscriptionId;
@@ -70,6 +75,8 @@ contract ChainlinkFunctionsSettlementOracle is ISettlementOracle, FunctionsClien
     mapping(bytes32 => Price) public priceOf; // feedId => price
     mapping(bytes32 => Pending) public pendingRequest; // requestId => request
     mapping(uint256 => bytes32) public pendingOf; // seriesId => open requestId
+    mapping(uint256 => uint8) public attemptsOf; // seriesId => requests sent
+    mapping(uint256 => uint64) public lastRequestAt; // seriesId => time of the latest request
 
     error AlreadyBound();
     error NotDeployer();
@@ -87,6 +94,8 @@ contract ChainlinkFunctionsSettlementOracle is ISettlementOracle, FunctionsClien
     error NotPriced();
     error PriceTooEarly();
     error RefundFailed();
+    error TooManyAttempts();
+    error CoolingDown(uint64 readyAt);
 
     event HourlyBound(address hourly);
     event SourceRegistered(bytes32 indexed sourceHash);
@@ -183,10 +192,17 @@ contract ChainlinkFunctionsSettlementOracle is ISettlementOracle, FunctionsClien
             revert RequestPending(open);
         }
 
+        // Cooldown applies even after an error response cleared `pendingOf`.
+        if (attemptsOf[seriesId] >= MAX_ATTEMPTS) revert TooManyAttempts();
+        uint64 ready = lastRequestAt[seriesId] + retryAfter;
+        if (lastRequestAt[seriesId] != 0 && block.timestamp < ready) revert CoolingDown(ready);
+
         string memory source = _sources[f.sourceHash];
         if (keccak256(bytes(source)) != f.sourceHash) revert SourceMismatch();
 
         requestId = _sendRequest(buildRequest(s.feedId), subscriptionId, callbackGasLimit, donId);
+        attemptsOf[seriesId] += 1;
+        lastRequestAt[seriesId] = uint64(block.timestamp);
         if (open != bytes32(0)) delete pendingRequest[open]; // a late answer to the old one is ignored
         pendingRequest[requestId] = Pending(seriesId, s.feedId, uint64(block.timestamp));
         pendingOf[seriesId] = requestId;

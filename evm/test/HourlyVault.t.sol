@@ -36,13 +36,21 @@ contract HourlyVaultTest is Base {
             qty: qty,
             premium: premium,
             quoteExpiry: type(uint64).max,
-            nonce: vNonce++
+            nonce: vNonce++,
+            maxFeeBps: 500
         });
     }
 
     function vsign(HourlyVault v, uint256 key, HourlyVault.VaultQuote memory q) internal view returns (bytes memory) {
         (uint8 vv, bytes32 r, bytes32 s) = vm.sign(key, v.hashVaultQuote(q));
         return abi.encodePacked(r, s, vv);
+    }
+
+    function loosen(HourlyVault v) internal {
+        vm.startPrank(admin);
+        v.setMaxTradeBps(10_000);
+        v.setMaxEpochBps(10_000);
+        vm.stopPrank();
     }
 
     function trade(HourlyVault v, uint256 quoterKey, address who, uint256 id, bool sells, uint256 qty, uint256 prem)
@@ -63,6 +71,7 @@ contract HourlyVaultTest is Base {
     function test_vault_underwrites_an_epoch_and_pays_lps_pro_rata() public {
         // the venue's pricing engine is the quoter
         HourlyVault v = newVault(1, maker, DEP_END, EPOCH_END, 2_000); // 20% cap per series
+        loosen(v); // this test writes 50 of 400 in one trade
 
         // two LPs deposit 300 and 100
         lpFund(v, lp1, 300 * USD);
@@ -104,7 +113,7 @@ contract HourlyVaultTest is Base {
         assertEq(usdc.balanceOf(taker), 100 * USD - 20 * USD - 200_000);
         assertEq(usdc.balanceOf(treasury), 200_000);
         // the cap: 20% of 400 = $80 of collateral in one series; 31 more would make 81
-        q = vq(s, true, 31, 0);
+        q = vq(s, true, 31, 31 * USD / 2);
         sig = vsign(v, makerKey, q);
         vm.prank(taker);
         vm.expectRevert(HourlyVault.VaultLimit.selector);
@@ -197,7 +206,7 @@ contract HourlyVaultTest is Base {
         v.deposit(1);
         uint256 s = createSeries(DIGITAL, 2_700_000, uint64(USD), 1, T0, T0 + 5 * DAY);
         vm.warp(T0 + DAY);
-        HourlyVault.VaultQuote memory q = vq(s, true, 1, 0);
+        HourlyVault.VaultQuote memory q = vq(s, true, 1, USD / 100);
         bytes memory sig = vsign(v, makerKey, q);
         vm.prank(taker);
         vm.expectRevert(HourlyVault.Paused.selector);
@@ -211,14 +220,14 @@ contract HourlyVaultTest is Base {
         vm.expectRevert(HourlyVault.QuoteUsed.selector);
         v.trade(q, sig);
         // a quote addressed to another taker
-        q = vq(s, true, 1, 0);
+        q = vq(s, true, 1, USD / 100);
         q.taker = maker;
         sig = vsign(v, makerKey, q);
         vm.prank(taker);
         vm.expectRevert(HourlyVault.Unauthorized.selector);
         v.trade(q, sig);
         // stale quote
-        q = vq(s, true, 1, 0);
+        q = vq(s, true, 1, USD / 100);
         q.quoteExpiry = T0;
         sig = vsign(v, makerKey, q);
         vm.prank(taker);
@@ -232,7 +241,7 @@ contract HourlyVaultTest is Base {
         // an unregistered vault cannot reach Hourly
         vm.prank(admin);
         hourly.setVault(address(v), false);
-        q = vq(s, true, 1, 0);
+        q = vq(s, true, 1, USD / 100);
         sig = vsign(v, makerKey, q);
         vm.prank(taker);
         vm.expectRevert(Hourly.Unauthorized.selector);
@@ -249,6 +258,7 @@ contract HourlyVaultTest is Base {
         d2 = uint64(bound(d2, 1, 1_000_000 * USD));
         uint256 total = uint256(d1) + d2;
         HourlyVault v = newVault(3, maker, T0 + DAY, T0 + 8 * DAY, 10_000);
+        loosen(v);
         lpFund(v, lp1, d1);
         lpFund(v, lp2, d2);
         vm.prank(lp1);
@@ -259,7 +269,7 @@ contract HourlyVaultTest is Base {
         uint256 s = createSeries(DIGITAL, 2_700_000, uint64(USD), 1, T0, expiry);
         vm.warp(T0 + DAY);
         qty = uint16(bound(qty, 0, total / USD > 1_000 ? 1_000 : total / USD));
-        premium = uint64(bound(premium, 0, 1_000 * USD));
+        premium = uint64(bound(premium, uint256(qty) * USD / 100, 1_000 * USD)); // vault sells >= 1% of max payoff
         if (qty > 0) {
             lpFund(v, taker, premium + premium / 100);
             trade(v, makerKey, taker, s, true, qty, premium);

@@ -59,7 +59,7 @@ contract Handler is Test {
         uint256 ti = (mi + 1 + ((seed >> 16) % (actors.length - 1))) % actors.length;
         qty = bound(qty, 1, 50);
         premium = bound(premium, 0, 500 * USD);
-        Hourly.Quote memory q = Hourly.Quote(id, actors[mi], address(0), makerSells, qty, premium, type(uint64).max, nonce++);
+        Hourly.Quote memory q = Hourly.Quote(id, actors[mi], address(0), makerSells, qty, premium, type(uint64).max, nonce++, 500);
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(keys[mi], hourly.hashQuote(q));
         vm.prank(actors[ti]);
         try hourly.fill(q, abi.encodePacked(r, s, v)) { ok["fill"]++; } catch {}
@@ -94,7 +94,7 @@ contract Handler is Test {
         address t = actors[(seed >> 8) % actors.length];
         qty = bound(qty, 1, 20);
         premium = bound(premium, 0, 100 * USD);
-        HourlyVault.VaultQuote memory q = HourlyVault.VaultQuote(id, address(0), sells, qty, premium, type(uint64).max, nonce++);
+        HourlyVault.VaultQuote memory q = HourlyVault.VaultQuote(id, address(0), sells, qty, premium, type(uint64).max, nonce++, 500);
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(quoterKey, vault.hashVaultQuote(q));
         vm.prank(t);
         try vault.trade(q, abi.encodePacked(r, s, v)) { ok["vaultTrade"]++; } catch {}
@@ -179,7 +179,7 @@ abstract contract InvariantBase is StdInvariant, Test {
     function setUp() public virtual {
         vm.warp(T0);
         usdc = new MockUSDC();
-        hourly = new Hourly(usdc, admin, makeAddr("treasury"), makeAddr("settler"), new NoOracle(), 100);
+        hourly = new Hourly(usdc, admin, makeAddr("treasury"), makeAddr("settler"), new NoOracle(), 100, admin);
         (address quoter, uint256 qk) = makeAddrAndKey("quoter");
         uint256[] memory ids = new uint256[](4);
         vm.startPrank(admin);

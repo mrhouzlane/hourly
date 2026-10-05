@@ -35,7 +35,7 @@ contract Hourly is ERC1155Supply, EIP712, ReentrancyGuard {
     uint64 public constant FALLBACK_DELAY = 72 hours;
 
     bytes32 public constant QUOTE_TYPEHASH = keccak256(
-        "Quote(uint256 seriesId,address maker,address taker,bool makerSells,uint256 qty,uint256 premium,uint64 quoteExpiry,uint256 nonce)"
+        "Quote(uint256 seriesId,address maker,address taker,bool makerSells,uint256 qty,uint256 premium,uint64 quoteExpiry,uint256 nonce,uint16 maxFeeBps)"
     );
 
     // ------------------------------------------------------------------- types
@@ -71,6 +71,7 @@ contract Hourly is ERC1155Supply, EIP712, ReentrancyGuard {
         uint256 premium;
         uint64 quoteExpiry;
         uint256 nonce;
+        uint16 maxFeeBps; // the fill reverts if the live fee exceeds this
     }
 
     // ------------------------------------------------------------------ errors
@@ -95,6 +96,8 @@ contract Hourly is ERC1155Supply, EIP712, ReentrancyGuard {
     error QuoteUsed();
     error WrongTaker();
     error ZeroAddress();
+    error FeeTooHigh();
+    error PremiumTooLow();
 
     // ------------------------------------------------------------------ events
 
@@ -121,15 +124,24 @@ contract Hourly is ERC1155Supply, EIP712, ReentrancyGuard {
     event FeeSet(uint16 feeBps);
     event PausedSet(bool paused);
     event VaultSet(address vault, bool allowed);
+    event ListerSet(address lister);
+    event MinPremiumSet(uint256 minPremium);
 
     // ------------------------------------------------------------------- state
 
     IERC20 public immutable quoteToken;
+    /// Governance (intended multisig): setters and pause only. Cannot list.
     address public immutable admin;
+    /// Hot listing key: createSeries and setVault only. Cannot pause, change
+    /// fees, the settler or the premium floor.
+    address public lister;
     address public immutable treasury;
     ISettlementOracle public immutable oracle;
     address public settler;
     uint16 public feeBps;
+    /// Smallest premium a fill may carry (quote atoms), so the fee cannot be
+    /// dodged with premium = 0 or by rounding on dust. Default 0.01 USDC.
+    uint256 public minPremium = 10_000;
     bool public paused;
 
     mapping(uint256 => Series) internal _series;
@@ -140,6 +152,11 @@ contract Hourly is ERC1155Supply, EIP712, ReentrancyGuard {
 
     modifier onlyAdmin() {
         if (msg.sender != admin) revert Unauthorized();
+        _;
+    }
+
+    modifier onlyLister() {
+        if (msg.sender != lister) revert Unauthorized();
         _;
     }
 
@@ -154,16 +171,18 @@ contract Hourly is ERC1155Supply, EIP712, ReentrancyGuard {
         address treasury_,
         address settler_,
         ISettlementOracle oracle_,
-        uint16 feeBps_
+        uint16 feeBps_,
+        address lister_
     ) ERC1155("") EIP712("Hourly", "1") {
         if (feeBps_ > MAX_FEE_BPS) revert BadTerms();
-        if (address(quoteToken_) == address(0) || admin_ == address(0) || treasury_ == address(0)) {
+        if (address(quoteToken_) == address(0) || admin_ == address(0) || treasury_ == address(0) || lister_ == address(0)) {
             revert ZeroAddress();
         }
         quoteToken = quoteToken_;
         admin = admin_;
         treasury = treasury_;
         settler = settler_;
+        lister = lister_;
         oracle = oracle_;
         feeBps = feeBps_;
     }
@@ -173,6 +192,17 @@ contract Hourly is ERC1155Supply, EIP712, ReentrancyGuard {
     function setSettler(address settler_) external onlyAdmin {
         settler = settler_;
         emit SettlerSet(settler_);
+    }
+
+    function setLister(address lister_) external onlyAdmin {
+        if (lister_ == address(0)) revert ZeroAddress();
+        lister = lister_;
+        emit ListerSet(lister_);
+    }
+
+    function setMinPremium(uint256 minPremium_) external onlyAdmin {
+        minPremium = minPremium_;
+        emit MinPremiumSet(minPremium_);
     }
 
     function setFee(uint16 feeBps_) external onlyAdmin {
@@ -189,9 +219,9 @@ contract Hourly is ERC1155Supply, EIP712, ReentrancyGuard {
         emit PausedSet(paused_);
     }
 
-    /// Registers an underwriting vault (Solana: create_vault is admin-only).
+    /// Registers an underwriting vault (Solana: create_vault). Lister role.
     /// A vault can only spend its own tokens through `vaultFill`.
-    function setVault(address vault, bool allowed) external onlyAdmin {
+    function setVault(address vault, bool allowed) external onlyLister {
         isVault[vault] = allowed;
         emit VaultSet(vault, allowed);
     }
@@ -215,7 +245,7 @@ contract Hourly is ERC1155Supply, EIP712, ReentrancyGuard {
         uint64 periodStart,
         uint64 expiry,
         bytes32 feedId
-    ) external onlyAdmin returns (uint256 id) {
+    ) external onlyLister returns (uint256 id) {
         if (kind > HourlyMath.KIND_DIGITAL) revert BadKind();
         if (cap == 0 || units == 0) revert BadTerms();
         if (strike == 0) revert BadTerms();
@@ -260,7 +290,8 @@ contract Hourly is ERC1155Supply, EIP712, ReentrancyGuard {
                     q.qty,
                     q.premium,
                     q.quoteExpiry,
-                    q.nonce
+                    q.nonce,
+                    q.maxFeeBps
                 )
             )
         );
@@ -303,6 +334,7 @@ contract Hourly is ERC1155Supply, EIP712, ReentrancyGuard {
         (address buyer, address seller) = vaultSells ? (taker, msg.sender) : (msg.sender, taker);
         Series storage s = _checkTradable(id, qty, buyer, seller);
         uint256 collateral = HourlyMath.collateralPerContract(s.cap, s.units) * qty;
+        if (premium < minPremium) revert PremiumTooLow();
         fee = HourlyMath.feeFor(premium, feeBps);
         _book(s, id, seller, collateral, qty);
         quoteToken.safeTransferFrom(msg.sender, address(this), collateral);
@@ -394,6 +426,8 @@ contract Hourly is ERC1155Supply, EIP712, ReentrancyGuard {
         nonceUsed[q.maker][q.nonce] = true;
 
         uint256 collateral = HourlyMath.collateralPerContract(s.cap, s.units) * q.qty;
+        if (q.premium < minPremium) revert PremiumTooLow();
+        if (feeBps > q.maxFeeBps) revert FeeTooHigh();
         uint256 fee = HourlyMath.feeFor(q.premium, feeBps);
         _book(s, q.seriesId, seller, collateral, q.qty);
         quoteToken.safeTransferFrom(seller, address(this), collateral);

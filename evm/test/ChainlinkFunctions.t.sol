@@ -35,7 +35,7 @@ contract ChainlinkFunctionsTest is Base {
         super.setUp();
         router = new MockFunctionsRouter();
         clf = new CLF(address(router), DON, SUB, CB_GAS, RETRY);
-        hourly = new Hourly(usdc, admin, treasury, settler, clf, FEE_BPS);
+        hourly = new Hourly(usdc, admin, treasury, settler, clf, FEE_BPS, admin);
         clf.bind(hourly);
         source = vm.readFile("functions/settle.js");
         sourceHash = clf.registerSource(source);
@@ -189,12 +189,18 @@ contract ChainlinkFunctionsTest is Base {
 
     function test_cl_error_and_malformed_responses_do_not_settle() public {
         uint64 expiry = T0 + 5 * DAY;
-        uint256 s = listed(feedSep, expiry);
-        vm.warp(expiry + 60);
+        // one series per case: each series is capped at MAX_ATTEMPTS requests (L6)
+        uint256[5] memory ids;
+        for (uint256 i = 0; i < 5; i++) {
+            ids[i] = listed(feedSep, expiry + uint64(i) * 1 hours);
+        }
+        vm.warp(expiry + 5 hours);
 
         bytes[4] memory badResponses =
             [bytes(""), abi.encodePacked(uint248(SEP_MEAN)), abi.encode(uint256(0)), abi.encode(uint256(1) << 64)];
+        uint256 s = ids[0];
         for (uint256 i = 0; i < 5; i++) {
+            s = ids[i];
             bytes32 rid = clf.requestSettlement(s);
             bool ok;
             if (i == 0) {
@@ -207,7 +213,7 @@ contract ChainlinkFunctionsTest is Base {
             }
             assertTrue(ok); // the callback never reverts on DON input
             assertFalse(settled(s));
-            assertEq(clf.pendingOf(s), bytes32(0)); // free to retry at once
+            assertEq(clf.pendingOf(s), bytes32(0)); // pending slot freed (cooldown still applies)
             (uint64 atoms,,) = clf.priceOf(feedSep);
             assertEq(atoms, 0);
         }
@@ -215,14 +221,45 @@ contract ChainlinkFunctionsTest is Base {
         hourly.settleOracle(s, new bytes[](0));
     }
 
+    /// L6: a permissionless caller cannot loop paid requests, with or without
+    /// answers in between.
+    function test_L6_requests_are_capped_and_cooled_down() public {
+        uint64 expiry = T0 + 5 * DAY;
+        uint256 s = listed(feedSep, expiry);
+        vm.warp(expiry + 60);
+        assertEq(clf.MAX_ATTEMPTS(), 3);
+
+        bytes32 r = clf.requestSettlement(s);
+        router.fulfill(r, "", bytes("ornn http 503")); // error clears the pending slot
+        assertEq(clf.pendingOf(s), bytes32(0));
+        // ... but an immediate retry is still refused (cooldown)
+        vm.expectRevert(abi.encodeWithSelector(CLF.CoolingDown.selector, uint64(block.timestamp) + RETRY));
+        clf.requestSettlement(s);
+
+        for (uint256 i = 1; i < 3; i++) {
+            vm.warp(block.timestamp + RETRY);
+            r = clf.requestSettlement(s);
+            router.fulfill(r, "", bytes("ornn http 503"));
+        }
+        assertEq(clf.attemptsOf(s), 3);
+        vm.warp(block.timestamp + 10 * RETRY);
+        vm.expectRevert(CLF.TooManyAttempts.selector);
+        clf.requestSettlement(s);
+        // the fallback settler still finishes the series
+        vm.warp(expiry + FALLBACK);
+        settleBackup(s, SEP_MEAN);
+        assertTrue(settled(s));
+    }
+
     function test_cl_retry_after_error_and_after_timeout() public {
         uint64 expiry = T0 + 5 * DAY;
         uint256 s = listed(feedSep, expiry);
         vm.warp(expiry + 60);
 
-        // error, then an immediate retry succeeds
+        // error, then a retry after the cooldown succeeds
         bytes32 r1 = clf.requestSettlement(s);
         router.fulfill(r1, "", bytes("ornn http 503"));
+        vm.warp(block.timestamp + RETRY);
         bytes32 r2 = clf.requestSettlement(s);
         assertTrue(r2 != r1);
 
