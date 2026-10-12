@@ -342,3 +342,60 @@ html body.sk .tempty{padding:14px 16px!important;margin:0!important;min-height:0
 html body.sk .hse{background:transparent!important;border:0!important;box-shadow:none!important}
 html body.sk .hs-chipc .m .up{color:var(--dk-up)!important}
 html body.sk .hs-chipc .m .dn{color:var(--dk-dn)!important}
+
+/* narrow screens: keep the top bar inside the viewport */
+@media (max-width:480px) {
+  html body.sk .menubar { padding:0 12px; gap:0; }
+  html body.sk .menubar .brand { margin-right:6px; font-size:16px!important; }
+  html body.sk .menubar button { padding:0 8px; font-size:13px; }
+  html body.sk .menubar #wallet-btn { padding:0 10px; font-size:12px; margin-left:4px; }
+}
+html body.sk a.hm-b { display:inline-flex; align-items:center; text-decoration:none; font:inherit; }
+
+html body.sk .hm-x{margin-top:36px;border:1px solid rgba(0,0,0,.14);border-radius:14px;padding:20px 22px;max-width:560px;background:rgba(255,255,255,.45)}
+html body.sk .hm-xk{font:500 12px/1 var(--font-mono);letter-spacing:.04em;text-transform:uppercase;color:var(--hz-ink-3);margin:0 0 12px}
+html body.sk .hm-xl{font:400 17px/1.55 var(--font-geo);color:var(--hz-black);margin:0 0 12px}
+html body.sk .hm-xf{font:400 14px/1.5 var(--font-geo);color:var(--hz-ink-2);margin:0}
+/* mobile: stop grid children from forcing the House page wider than the screen */
+.hs-grid>*,.hs-board>*,.hse .hs-kpis>*{min-width:0}
+.hse .hs-card{overflow-x:auto}
+.hse .hs-card svg{max-width:100%;height:auto}
+@media(max-width:640px){.hse .hs-hm{min-width:0}.hse .hs-hm th{font-size:9px}.hse .hs-hm td{font-size:9px;padding:12px 0}.hse .hs-hm .hm-c{width:34px}.hse .hs-kpis{grid-template-columns:repeat(2,1fr)}.hse .hs-board{grid-template-columns:repeat(2,1fr)}}
+
+/* pro terminal: the desk fills the viewport on desktop */
+.tpanes { display:flex; gap:2px; }
+.tpanes button { height:28px; padding:0 12px; border:0; border-radius:6px; background:transparent; font:500 13px var(--font-geo); color:var(--hz-ink-3); cursor:pointer; }
+.tpanes button.on { background:rgba(20,22,26,.07); color:var(--hz-black); }
+.tintel, .tvenues { overflow:auto; }
+.tintel .ptab, .tvenues .ptab { width:100%; border-collapse:collapse; font:400 13px var(--font-geo); }
+.tintel th, .tvenues th { text-align:left; font:500 11px var(--font-geo); text-transform:uppercase; letter-spacing:.05em; color:var(--hz-ink-3); padding:8px 12px 6px; border-bottom:1px solid var(--dk-bd); white-space:nowrap; }
+.tintel td, .tvenues td { padding:9px 12px; border-bottom:1px solid rgba(20,22,26,.05); font-variant-numeric:tabular-nums; vertical-align:top; }
+.tintel .r, .tvenues .r { text-align:right; }
+.tintel tr[data-gpu] { cursor:pointer; } .tintel tr[data-gpu]:hover, .tintel tr.sel { background:rgba(20,22,26,.04); }
+.tintel .sp { color:var(--hz-ink-3); padding-top:4px; padding-bottom:4px; } .spark { display:block; margin-left:auto; }
+.tintel .tfine, .tvenues .tfine { padding:8px 12px 0; }
+.tvenues a { color:var(--hz-black); }
+.tdesk .tfine .muted, .tvenues .muted { font-size:11px; }
+@media (min-width:981px) {
+  html body.sk.onterm .desk { padding:12px 20px 12px; }
+  html body.sk.onterm .tdesk { height:calc(100vh - 52px - 24px); min-height:560px; align-items:stretch; }
+  html body.sk.onterm .tmain { min-height:0; gap:10px; }
+  html body.sk.onterm .tchart { flex:1 1 auto; min-height:0; display:flex; flex-direction:column; overflow:hidden; padding:10px 14px 8px; }
+  html body.sk.onterm .tchart .thead { margin-bottom:4px; align-items:center; }
+  html body.sk.onterm .tbody { flex:1 1 auto; min-height:0; overflow:auto; }
+  html body.sk.onterm .tpos { flex:0 0 190px; min-height:0; overflow:auto; }
+  html body.sk.onterm .ticket { position:static; height:100%; overflow-y:auto; box-sizing:border-box; }
+}
+@media (max-width:980px) {
+  .tchart .thead { flex-wrap:wrap; gap:6px 10px; }
+  .tchart .thead .tpanes { flex:1 0 100%; }
+  .tchart .thead .tname small { display:none; }
+  .tchart .thead .tpx { margin-left:auto; }
+  .tintel, .tvenues { max-width:100%; }
+  .tintel .ptab, .tvenues .ptab { min-width:640px; }
+  html body.sk.onterm .tchart { max-width:100%; overflow:hidden; }
+}
+html body.sk .tdesk .tintel span.dn, html body.sk .tdesk .apill em.dn { color:var(--dk-dn)!important; }
+html body.sk .tdesk .tintel span.up { color:var(--dk-up)!important; }
+html body.sk .tdesk .apill.on em.dn { color:#f0a3a3!important; }
+.tvenues td.r { white-space:nowrap; }

@@ -54,9 +54,9 @@ async function api(path, body) {
 // ---------- state ----------
 const S = {
   status: null, index: [], markets: [], vaults: [], activity: null, portfolio: null, stake: null, wallet: null, earnTab: "vault",
-  view: /[?&]t=/.test(location.search) ? "desk" : "home",
+  view: /[?&]t=/.test(location.search) ? "desk" : /[?&]docs=1/.test(location.search) ? "docs" : /[?&]cap=/.test(location.search) ? "hedge" : "home",
   t: { step: 1, gpu: "H100_SXM", side: null, strike: null, seriesId: null, amount: 10, quote: null, hl: 0 },
-  hedge: { gpu: "H100_SXM", role: "own", collar: false, win: null, more: false },
+  hedge: { gpu: "H100_SXM", role: "own", collar: false, win: null, more: false, qty: 1 },
   feedWin: "24h",
 };
 const GPU_ORDER = ["H100_SXM", "H200", "B200", "A100_SXM4"];
@@ -199,7 +199,7 @@ function walletPicker(after) {
       catch (e) { $("#w-st", m).textContent = e.message || "Declined."; }
     }));
     const bb = $("[data-burner]", m);
-    if (bb) bb.addEventListener("click", async () => { await setWallet(burnerWallet()); close(); if (after) after(); });
+    if (bb) bb.addEventListener("click", async () => { await setWallet(burnerWallet()); close(); await autoFund(); if (after) after(); });
   });
 }
 function ensureWallet(then) { if (S.wallet) return then(); walletPicker(then); }
@@ -839,6 +839,7 @@ function protectionRows() {
 }
 const CHART_GLYPH = '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M2 14l5-6 4 4 7-8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 function hedgeView() {
+  applyCapLink();
   const codes = GPU_ORDER.filter((c) => hedgePair(c));
   if (!codes.length) return '<section class="app"><p class="small">No protections are open right now.</p></section>';
   const h = S.hedge;
@@ -846,9 +847,10 @@ function hedgeView() {
   const wins = hedgeWindows(h.gpu);
   if (!wins.includes(h.win)) h.win = wins[0];
   const { put, call } = hedgePair(h.gpu, h.win);
-  const own = h.role === "own", month = monthOf(put.windowStart), g = put.gpu, u = put.units;
+  const own = h.role === "own", month = monthOf(put.windowStart), g = put.gpu, u = put.units, qn = h.qty || 1;
   const collar = own && h.collar;
-  const price = own ? (collar ? put.model.ask - call.model.bid : put.model.ask) : call.model.ask;
+  const feeMul = 1 + ((S.status && S.status.feeBps) || 0) / 10000;
+  const price = (own ? (collar ? put.model.ask - call.model.bid : put.model.ask) : call.model.ask) * feeMul;
   const k = own ? put.strike : call.strike, far = own ? put.strike - put.cap : call.strike + call.cap, maxPay = own ? put.maxPayoff : call.maxPayoff;
   const m = S._hm = hedgeModel(put, call, h.role, collar, price);
   const now = lastPrint(h.gpu);
@@ -871,7 +873,7 @@ function hedgeView() {
       <span class="llab">${own ? "Floor" : "Cap"} <i title="${esc(rule)}">i</i></span>
       <div class="lnum">$${k.toFixed(2)}</div>
       <div class="ldelta">${delta === null ? "" : `${Math.abs(delta * 100).toFixed(1)}% ${delta < 0 ? "below" : "above"} today`}</div>
-      <div class="lrows"><div><span>You pay once</span><b>${usd(price)}</b></div><div><span>Get up to</span><b>${usd(maxPay, 0)}</b></div></div>
+      <div class="lrows"><div><span>You pay once</span><b>${usd(price * qn)}</b></div><div><span>Get up to</span><b>${usd(maxPay * qn, 0)}</b></div></div>
     </div>
     ${h.more ? `<section class="afold">
       <div class="chips">${m.chance === null ? "" : `<span>Model chance it pays: <b>${Math.round(m.chance * 100)}%</b></span>`}${m.be === null ? "" : `<span>Break-even: <b>$${m.be.toFixed(2)}</b></span>`}</div>
@@ -880,15 +882,15 @@ function hedgeView() {
       <p class="small">Move over the chart to try a price.</p></section>` : `<p class="arule">${rule}</p>`}
     ${own ? `<label class="sw"><span>Pay less: give up gains above $${call.strike.toFixed(2)}</span><input type="checkbox" id="collar" ${collar ? "checked" : ""}><i></i></label>` : ""}
     <div class="acta">
-      <button class="cta" id="hedge-go">${own ? "Protect" : "Cap"} ${month} for ${usd(price)}</button>
-      <p class="fine">One-time price for 1 GPU, all ${u} hours of the month. Settles in ${countdown(put.tradingEnd)}.</p>
+      <button class="cta" id="hedge-go">${own ? "Protect" : "Cap"} ${month} for ${usd(price * qn)}</button>
+      <p class="fine">One-time price for ${qn} GPU${qn > 1 ? "s" : ""}, all ${u} hours of the month. Settles in ${countdown(put.tradingEnd)}.</p>
       <p class="status" id="h-st"></p>
     </div>
     <section class="wbody mine"><h3>Your protections</h3>${protectionRows()}</section>
   </section>`;
 }
 function bindHedge() {
-  $$("[data-hg]").forEach((b) => b.addEventListener("click", () => { S.hedge.gpu = b.dataset.hg; render(); }));
+  $$("[data-hg]").forEach((b) => b.addEventListener("click", () => { S.hedge.gpu = b.dataset.hg; S.hedge.qty = 1; render(); }));
   $$("[data-role]").forEach((b) => b.addEventListener("click", () => { S.hedge.role = b.dataset.role; render(); }));
   $$("[data-win]").forEach((b) => b.addEventListener("click", () => { S.hedge.win = b.dataset.win; render(); }));
   $$("[data-more]").forEach((b) => b.addEventListener("click", () => { S.hedge.more = b.dataset.more === "1"; render(); }));
@@ -915,7 +917,7 @@ function bindHedge() {
   if (go) go.addEventListener("click", () => ensureWallet(async () => {
     const { put, call } = hedgePair(S.hedge.gpu, S.hedge.win);
     const own = S.hedge.role === "own";
-    const legs = own ? [{ series: put.id, side: "buy", qty: 1 }, ...(S.hedge.collar ? [{ series: call.id, side: "sell", qty: 1 }] : [])] : [{ series: call.id, side: "buy", qty: 1 }];
+    const legs = own ? [{ series: put.id, side: "buy", qty: S.hedge.qty || 1 }, ...(S.hedge.collar ? [{ series: call.id, side: "sell", qty: S.hedge.qty || 1 }] : [])] : [{ series: call.id, side: "buy", qty: S.hedge.qty || 1 }];
     const st = $("#h-st");
     try {
       st.textContent = "Getting a firm price.";
@@ -930,11 +932,14 @@ function bindHedge() {
         <div class="actions"><button class="btn" data-close>Cancel</button><button class="btn default" id="ok">Sign with wallet</button></div>`,
       (m, close) => $("#ok", m).addEventListener("click", async () => {
         close();
-        try { const r = await signAndSubmit(q); alertBox("✓", "Protected.", `${esc(put.gpu)} ${monthOf(put.windowStart)} is in your portfolio.`, r.url); await Promise.all([refreshMarkets(), refreshPortfolio(), refreshActivity()]); render(); }
+        try { const r = await signAndSubmit(q); alertBox("✓", own ? "Protected." : "Rate capped.", `${esc(put.gpu)} ${monthOf(put.windowStart)} is in your portfolio.`, r.url); await Promise.all([refreshMarkets(), refreshPortfolio(), refreshActivity()]); render(); }
         catch (e) { alertBox("!", "Not sent.", esc(e.message)); }
       }));
       st.textContent = "";
-    } catch (e) { st.textContent = e.message; }
+    } catch (e) {
+      if (/faucet/i.test(e.message) && !go._funded && S.wallet.kind === "burner") { go._funded = true; await autoFund(); go.click(); return; }
+      st.textContent = e.message;
+    }
   }));
 }
 
@@ -1092,6 +1097,11 @@ function bindActivity() {
 }
 
 // ---------- portfolio ----------
+// A fresh burner on a test chain gets test USDC without a click. Silent, best effort (the faucet may rate-limit).
+async function autoFund() {
+  if (!S.wallet || S.wallet.kind !== "burner" || (S.status && S.status.cluster === "mainnet")) return;
+  try { if (S.portfolio && S.portfolio.usdc > 0) return; await api("faucet", { owner: S.wallet.address }); await refreshPortfolio(); render(); } catch (_) { /* the ticket offers the faucet button */ }
+}
 async function faucet() {
   try { const r = await api("faucet", { owner: S.wallet.address }); alertBox("✓", "Added test USDC.", `${usd(r.amount, 0)} is in your wallet.`, r.url); }
   catch (e) { alertBox("!", "Faucet", esc(e.message)); }
@@ -1154,6 +1164,17 @@ function applyDeepLink() {
   S.t.gpu = gpu; S.t.side = side === "lower" ? "lower" : "higher"; S.t.amount = Math.min(1000, Math.max(1, Number(amt) || 10));
   if (m) { S.t.strike = m.strike; S.t.seriesId = m.id; }
 }
+// /freeze hands off here: ?cap=<CHIP>~<YYYY-MM-01>~<contracts>
+function applyCapLink() {
+  let v; try { v = new URLSearchParams(location.search).get("cap"); } catch (_) { return; }
+  if (!v || S.dlc || !S.markets.length) return;
+  S.dlc = true;
+  const [gpu, win, qty] = v.split("~");
+  if (!GPU_ORDER.includes(gpu)) return;
+  S.hedge.gpu = gpu; S.hedge.role = "rent"; S.hedge.collar = false;
+  if (win) S.hedge.win = win;
+  S.hedge.qty = Math.min(50, Math.max(1, Math.floor(Number(qty)) || 1));
+}
 function deskInit() {
   applyDeepLink();
   const t = S.t;
@@ -1199,7 +1220,7 @@ function ticketHtml() {
     bottom = `<div class="tlab">Amount</div>
       <div class="tamt"><span>$</span><input id="amt" inputmode="decimal" value="${t.amount}" aria-label="Amount in USDC"><div class="tchips">${[5, 20, 50, 100].map((v) => `<button data-amt="${v}" class="${t.amount === v ? "on" : ""}">$${v}</button>`).join("")}</div></div>
       <div class="thero"><div><i>You pay at most</i><b id="loss">${usd(t.amount)}</b></div><div class="w"><i>You get if right</i><b id="win" data-v="${qty}">${usd(qty)}</b></div></div>
-      <p class="tsub">${pct(sideChance(m, t.side))} chance · ${cents(unit)} per $1 · <span id="qty">${qty}</span> contracts</p>
+      <div class="tlines"><div><span>Implied chance</span><b>${pct(sideChance(m, t.side))}</b></div><div><span>Price per $1 payout</span><b>${cents(unit)}</b></div><div><span>Contracts</span><b id="qty">${qty}</b></div><div><span>Fee</span><b>${up ? "1%" : "none"}</b></div><div><span>Max loss</span><b>${up ? "price paid" : "locked collateral"}</b></div><div><span>Payout</span><b>escrowed up front</b></div><div><span>Other side</span><b>vault, else desk</b></div></div>
       <button class="tcta ${S.wallet ? (up ? "up" : "dn") : "gold"}" id="t-go" ${qty > 0 || !S.wallet ? "" : "disabled"}>${S.wallet ? (t.quoting ? "Getting a firm price" : "Get a firm price") : "Connect wallet"}</button>
       <p class="status tst" id="t-st">${t.qerr ? esc(t.qerr) : ""}</p>
       <div class="tshare"><button id="t-copy">Copy link to this trade</button><a target="_blank" rel="noopener" href="${xShare(`${g} ${verb} $${m.strike.toFixed(2)} on ${day(m.windowEnd)}: ${pct(sideChance(m, t.side))} chance, ${cents(unit)} per $1.`).replace(encodeURIComponent(location.origin + location.pathname), encodeURIComponent(tradeLink()))}">Post it</a></div>`;
@@ -1216,11 +1237,14 @@ function tapeMarquee() {
 function deskPositions() {
   const tab = S.deskTab || "positions";
   const test = S.status && S.status.cluster !== "mainnet";
-  const tabs = `<div class="ttabs">${[["positions", "Positions"], ["tape", "Tape"]].map(([k, l]) => `<button data-tt="${k}" class="${tab === k ? "on" : ""}">${l}</button>`).join("")}<span class="spacer"></span>${S.wallet && test ? '<button class="mini" id="pf-faucet">Add test USDC</button>' : ""}</div>`;
+  const tabs = `<div class="ttabs">${[["positions", "Positions"], ["tape", "Tape"], ["settled", "Settled"]].map(([k, l]) => `<button data-tt="${k}" class="${tab === k ? "on" : ""}">${l}</button>`).join("")}<span class="spacer"></span>${S.wallet && test ? '<button class="mini" id="pf-faucet">Add test USDC</button>' : ""}</div>`;
   let body;
   if (tab === "tape") {
     const tr = (S.activity && S.activity.trades) || [];
     body = tr.length ? `<table class="ptab"><tr><th>When</th><th>Who</th><th>Trade</th><th class="r">Premium</th><th class="r">Result</th></tr>${tr.slice(0, 30).map((x) => `<tr><td>${ago(x.at)}</td><td>${esc(x.name)}</td><td>${esc(x.headline)}</td><td class="r">${usd(x.cost)}</td><td class="r">${x.settled ? (x.pnl >= 0 ? `<span class="up">+${usd(x.pnl)}</span>` : `<span class="dn">${usd(x.pnl)}</span>`) : "open"}</td></tr>`).join("")}</table>` : '<p class="tempty">No trades yet.</p>';
+  } else if (tab === "settled") {
+    const rs = S.wallet && S.portfolio ? S.portfolio.rows.filter((r) => r.status === "settled") : [];
+    body = !S.wallet ? '<p class="tempty">Connect wallet to see what settled for you.</p>' : rs.length ? `<table class="ptab"><tr><th>Market</th><th class="r">Settled at</th><th class="r">Payout</th></tr>${rs.map((r) => `<tr><td><b>${esc(r.gpu)} ${r.door === "predict" ? `$${r.strike.toFixed(2)} on ${day(r.windowEnd)}` : `${monthOf(r.windowStart)} ${r.kind === "put" ? "floor" : "cap"} $${r.strike.toFixed(2)}`}</b></td><td class="r">$${r.settled.price.toFixed(4)}</td><td class="r">${usd(r.long > 0 ? r.redeemable : r.reclaimable || 0)}</td></tr>`).join("")}</table>` : '<p class="tempty">Nothing settled yet.</p>';
   } else if (!S.wallet) {
     body = '<p class="tempty">Connect wallet to view your positions. <button class="mini" id="pf-connect">Connect</button></p>';
   } else if (!S.portfolio) {
@@ -1248,18 +1272,72 @@ function deskPositions() {
   }
   return `<section class="tpos">${tabs}${body}</section>`;
 }
+const logRet = (h) => h.slice(1).map((p, i) => Math.log(p[1] / h[i][1]));
+function intelRow(g) {
+  const h = g.history || [], last = h.length ? h[h.length - 1][1] : g.last;
+  const r = logRet(h.slice(-31)), mean = r.reduce((a, b) => a + b, 0) / (r.length || 1);
+  const vol = r.length > 5 ? Math.sqrt(r.reduce((a, b) => a + (b - mean) ** 2, 0) / (r.length - 1)) * Math.sqrt(365) : null;
+  const w30 = h.slice(-30).map((p) => p[1]), hi90 = Math.max(...h.slice(-90).map((p) => p[1]));
+  return { g, last, vol, lo: Math.min(...w30), hi: Math.max(...w30), dd: last / hi90 - 1, n: h.length, month: vol === null ? null : last * vol * Math.sqrt(30 / 365) };
+}
+function intelSpark(h) {
+  const v = h.slice(-90).map((p) => p[1]); if (v.length < 2) return "";
+  const lo = Math.min(...v), hi = Math.max(...v), W = 120, H = 28, d = hi - lo || 1;
+  const pts = v.map((y, i) => `${(i / (v.length - 1) * W).toFixed(1)},${(H - 2 - (y - lo) / d * (H - 4)).toFixed(1)}`).join(" ");
+  return `<svg class="spark" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" aria-hidden="true"><polyline points="${pts}" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>`;
+}
+const pctSgn = (x) => (x >= 0 ? "+" : "") + (x * 100).toFixed(1) + "%";
+function intelHtml() {
+  const rows = GPU_ORDER.map((c) => S.index.find((x) => x.code === c)).filter(Boolean).map(intelRow);
+  if (!rows.length) return '<p class="tempty">Loading the index.</p>';
+  const body = rows.map((r) => `<tr class="${r.g.code === S.t.gpu ? "sel" : ""}" data-gpu="${r.g.code}"><td><b>${esc(r.g.label)}</b></td><td class="r">${usd(r.last)}</td><td class="r"><span class="${r.g.chg7 >= 0 ? "up" : "dn"}">${pctSgn(r.g.chg7)}</span></td><td class="r"><span class="${r.g.chg30 >= 0 ? "up" : "dn"}">${pctSgn(r.g.chg30)}</span></td><td class="r"><span class="${r.g.chg90 >= 0 ? "up" : "dn"}">${pctSgn(r.g.chg90)}</span></td><td class="r">${usd(r.lo)} to ${usd(r.hi)}</td><td class="r">${r.vol === null ? "n/a" : (r.vol * 100).toFixed(0) + "%"}</td><td class="r">${r.month === null ? "n/a" : "±" + usd(r.month)}</td><td class="r"><span class="${r.dd >= -0.005 ? "" : "dn"}">${pctSgn(r.dd)}</span></td><td class="r sp">${intelSpark(r.g.history || [])}</td></tr>`).join("");
+  const h100 = rows.find((r) => r.g.code === "H100_SXM"), h200 = rows.find((r) => r.g.code === "H200"), b200 = rows.find((r) => r.g.code === "B200");
+  const ratio = (a, b, n) => (a && b ? `${n} ${(a.last / b.last).toFixed(2)}x` : "");
+  const first = (rows[0].g.history || [])[0], lastd = rows[0].g.lastDate;
+  return `<div class="tintel"><table class="ptab"><tr><th>Chip</th><th class="r">Rent now</th><th class="r">7d</th><th class="r">30d</th><th class="r">90d</th><th class="r">30d range</th><th class="r">Realised vol</th><th class="r">1 month, 1σ</th><th class="r">From 90d high</th><th class="r">90d</th></tr>${body}</table>
+    <p class="tfine">${[ratio(h200, h100, "H200 / H100"), ratio(b200, h100, "B200 / H100")].filter(Boolean).join(" · ")}${first ? ` · ${rows[0].n} daily prints from ${day(first[0])} to ${day(lastd)}` : ""}</p>
+    <p class="tfine">Source: Ornn OCPI daily prints. Realised vol is the standard deviation of daily log changes over 30 days, times √365. "1 month, 1σ" is rent times that vol over 30 days: a size of past moves, not a forecast.</p></div>`;
+}
+const VENUES = [
+  { name: "Hourly (this page)", where: "Solana", kind: "Monthly caps, daily higher or lower, on the Ornn index", status: "Test money", can: "Trade on a private test network. Settlement by Switchboard oracle is not yet proven on devnet. No mainnet.", url: "https://github.com/mrhouzlane/hourly", checked: "12 Oct" },
+  { name: "Polymarket", where: "On-chain", kind: "Bracket binaries on the Ornn index", status: "Live", can: "Bet on where Ornn H100 settles end of Oct, Nov, 2026. H200, B200, A100 also open.", url: "https://polymarket.com/event/gpu-rental-prices-h100-end-of-october", checked: "12 Oct" },
+  { name: "Bitget H100USDT, B200USDT", where: "Exchange", kind: "Perp, 10x, funding every 8h", status: "Live", can: "Trade 24/7. H100 last 2.638, 24h volume about $135k.", url: "https://www.bitget.com/support/articles/12560603894397", checked: "12 Oct" },
+  { name: "Kalshi", where: "Regulated exchange", kind: "Binaries", status: "Yearly max only", can: "Weekly and monthly series are finalized. Yearly-max GPU markets are open. Index source not named in the rules text.", url: "https://api.elections.kalshi.com/trade-api/v2/markets", checked: "12 Oct" },
+  { name: "Ornn", where: "Off-chain", kind: "Index plus rental marketplace", status: "Index live", can: "Read the index free. Reserve or rent nodes after sign-in. No futures on its own pages.", url: "https://data.ornn.com", checked: "12 Oct" },
+  { name: "Silicon Data", where: "Off-chain", kind: "Index only", status: "Index live", can: "Buy the data. No tradable product on the page.", url: "https://www.silicondata.com/products/silicon-index", checked: "12 Oct" },
+  { name: "CME / NYMEX, Silicon Data H100 and B200", where: "Off-chain", kind: "Futures", status: "Under CFTC review", can: "Nothing yet. CFTC letter extends the review to 9 Nov 2026. That is a review deadline, not a launch date.", url: "https://www.cftc.gov/filings/documents/2026/orgdcmnymexcompcontr260921.pdf", checked: "12 Oct" },
+  { name: "ICE x Ornn", where: "Off-chain", kind: "Futures", status: "Announced 19 May", can: "Nothing yet. Subject to regulatory approval, no date.", url: "https://ir.theice.com/press/news-details/2026/ICE-and-Ornn-to-Launch-GPU-Compute-Futures-Contracts/default.aspx", checked: "12 Oct" },
+  { name: "Architect AX", where: "Off-chain", kind: "Perps on Ornn indexes", status: "Announced 21 Jan", can: "Nothing confirmed live. Pending approval.", url: "https://www.prnewswire.com/news-releases/architect-financial-technologies-partners-with-compute-index-provider-ornn-to-launch-exchange-traded-futures-on-gpu-and-ram-prices-302666613.html", checked: "12 Oct" },
+  { name: "Nodal x Compute Desk", where: "Off-chain", kind: "Futures", status: "Announced 3 Sep", can: "Nothing yet. Planned this year, subject to compliance.", url: "https://www.nodalexchange.com/wp-content/uploads/Nodal-Exchange-and-Compute-Desk-to-launch-Compute-Futures-Contracts-Sep-3-2026.pdf", checked: "12 Oct" },
+  { name: "ICE x NATIVX", where: "Off-chain", kind: "Futures on the COIL index", status: "Announced 1 Jul", can: "Nothing yet. Later in 2026, approvals pending.", url: "https://ir.theice.com/press/news-details/2026/ICE-and-NATIVX-to-Launch-Energy-Normalized-Compute-Futures-Contracts/default.aspx", checked: "12 Oct" },
+  { name: "Hyperliquid compute perps", where: "On-chain", kind: "Perp", status: "Delisted", can: "Nothing. Open interest 0, stale mark.", url: "https://api.hyperliquid.xyz/info", checked: "12 Oct" },
+  { name: "Vast.ai", where: "Off-chain", kind: "Spot rental, reserved 1, 3, 6 months", status: "Live", can: "Rent on demand or reserve at a discount. No price hedge.", url: "https://vast.ai/pricing", checked: "12 Oct" },
+  { name: "Akash, Aethir", where: "On-chain / credits", kind: "Spot rental", status: "Live", can: "Rent. No forward or hedge product on their pages.", url: "https://akash.network", checked: "12 Oct" },
+  { name: "Compute Labs, io.net", where: "Claimed Solana", kind: "Unknown", status: "UNVERIFIED", can: "Pages blocked when read. Nothing confirmed.", url: "https://www.computelabs.ai", checked: "12 Oct" },
+];
+function venuesHtml() {
+  if (!VENUES.length) return '<p class="tempty">Venue list not published yet.</p>';
+  const row = (v) => `<tr><td><b>${esc(v.name)}</b></td><td>${esc(v.where)}</td><td>${esc(v.kind)}</td><td>${esc(v.status)}</td><td>${esc(v.can)}</td><td class="r"><a target="_blank" rel="noopener" href="${esc(v.url)}">source</a> <span class="muted">${esc(v.checked)}</span></td></tr>`;
+  return `<div class="tvenues"><table class="ptab"><tr><th>Venue</th><th>Where</th><th>Instrument</th><th>Status</th><th>What you can do today</th><th class="r">Checked</th></tr>${VENUES.map(row).join("")}</table>
+    <p class="tfine">Read on 12 Oct 2026, each row from its own source. UNVERIFIED means the page could not be opened. No Solana GPU-price derivative was found, but two Solana-linked pages were blocked.</p></div>`;
+}
 function deskView() {
   deskInit();
   const t = S.t, g = S.index.find((x) => x.code === t.gpu);
   if (!g) return '<section class="tdesk"><p class="tempty">Loading the index.</p></section>';
-  CHS.W = 980; CHS.H = 430;
+  const pane = S.pane || "chart";
+  CHS.W = 1100; CHS.H = innerWidth > 980 ? Math.max(240, Math.min(460, innerHeight - 440)) : 300;
   const pills = GPU_ORDER.map((c) => S.index.find((x) => x.code === c)).filter(Boolean).map((x) => `<button class="apill ${x.code === t.gpu ? "on" : ""}" data-gpu="${x.code}"><b>${esc(x.label)}</b><span>${usd(x.last)}</span><em class="${x.chg7 >= 0 ? "up" : "dn"}">${x.chg7 >= 0 ? "+" : ""}${(x.chg7 * 100).toFixed(2)}%</em></button>`).join("");
-  const stats = deskStats(g).slice(0, 3).map(([k, v]) => `<span class="spill"><i>${k}</i><b>${v}</b></span>`).join("");
+  const ir = intelRow(g), ds = deskStats(g);
+  const stats = [["30d vol", ir.vol === null ? "n/a" : (ir.vol * 100).toFixed(0) + "%"], ds[1], ds[2], ds[4]].map(([k, v]) => `<span class="spill"><i>${k}</i><b>${v}</b></span>`).join("");
   const rng = [30, 60, 90].map((n) => `<button data-rng="${n}" class="${(t.range || 30) === n ? "on" : ""}">${n}d</button>`).join("");
+  const panes = [["chart", "Chart"], ["intel", "Chip intel"], ["venues", "Venues"]].map(([k, l]) => `<button data-pane="${k}" class="${pane === k ? "on" : ""}">${l}</button>`).join("");
+  const head = `<div class="thead"><div class="tpanes">${panes}</div>${pane === "chart" ? `<span class="tname">${esc(g.label)}<small>rent per hour, Ornn daily print</small></span><span class="tpx">${usd(g.last)}</span><div class="seg trng">${rng}</div>` : ""}</div>`;
+  const body = pane === "intel" ? intelHtml() : pane === "venues" ? venuesHtml() : `<div class="chart" id="chart">${chartSvg()}</div><p class="tread">${esc(readLine(t.gpu))}</p>`;
   return `<section class="tdesk">
     <div class="tmain">
       <div class="tbar"><div class="apills">${pills}</div><div class="spills">${stats}</div></div>
-      <div class="tchart"><div class="thead"><span class="tname">${esc(g.label)}<small>rent per hour, Ornn daily print</small></span><span class="tpx">${usd(g.last)}</span><div class="seg trng">${rng}</div></div><div class="chart" id="chart">${chartSvg()}</div><p class="tread">${esc(readLine(t.gpu))}</p></div>
+      <div class="tchart tpane-${pane}">${head}<div class="tbody">${body}</div></div>
       ${deskPositions()}
     </div>
     ${ticketHtml()}
@@ -1330,6 +1408,8 @@ function bindDesk() {
   $$("[data-gpu]").forEach((b) => b.addEventListener("click", () => { S.t.gpu = b.dataset.gpu; S.t.strike = null; S.t.seriesId = null; S.t.quote = null; S.t.qerr = null; render(); }));
   $$("[data-rng]").forEach((b) => b.addEventListener("click", () => { S.t.range = Number(b.dataset.rng); $$("[data-rng]").forEach((x) => x.classList.toggle("on", x === b)); refreshChart(); }));
   $$("[data-tt]").forEach((b) => b.addEventListener("click", () => { S.deskTab = b.dataset.tt; render(); }));
+  $$("[data-pane]").forEach((b) => b.addEventListener("click", () => { S.pane = b.dataset.pane; render(); }));
+  $$(".tintel tr[data-gpu]").forEach((r) => r.addEventListener("click", () => { S.t.gpu = r.dataset.gpu; S.t.strike = null; S.t.seriesId = null; S.t.quote = null; S.t.qerr = null; S.pane = "chart"; render(); }));
   bindTicket(); bindPortfolio();
 }
 
@@ -1672,14 +1752,28 @@ function bindHouse() {
 
 // ---------- home + docs ----------
 const NARRATIVE = "Lock the price of compute.";
+function hmCap() {
+  const m = (S.markets || []).filter((x) => x.door === "hedge" && x.kind === "call" && x.status === "open" && x.model && x.units)
+    .sort((a, b) => (a.windowStart < b.windowStart ? -1 : a.windowStart > b.windowStart ? 1 : (a.underlying === "H100_SXM" ? -1 : b.underlying === "H100_SXM" ? 1 : 0)))[0];
+  if (!m) return "";
+  const g = (S.index || []).find((x) => x.code === m.underlying), name = g ? g.label : m.underlying;
+  const mo = new Date(m.windowStart + "T00:00:00Z").toLocaleString("en-US", { month: "long", timeZone: "UTC" });
+  const per = m.model.ask * 1.01, ceil = m.strike + per / m.units, usd = (n, d = 2) => "$" + n.toFixed(d);
+  return `<div class="hm-x">
+    <p class="hm-xk">A real quote, live from the desk</p>
+    <p class="hm-xl">A team renting 1 ${esc(name)} all of ${mo} pays at most <b>${usd(ceil)}</b> per GPU-hour. It pays <b>${usd(per)}</b> once. If the monthly average rent rises above <b>${usd(m.strike)}</b>, the gap is paid back, up to <b>${usd(m.cap)}</b> an hour.</p>
+    <p class="hm-xf">Who takes the other side: the weekly vault, else Hourly's own desk. Why not a perp: no margin, no liquidation. The full payout is in escrow before you pay and your loss is capped at the price paid.</p>
+  </div>`;
+}
 function hmView() {
   const chips = S.index.map((g) => `<button class="hm-chip" data-go="desk" data-gpu="${g.code}"><b>${esc(g.label)}</b><span>$${g.last.toFixed(2)}<i>/hr</i></span></button>`).join("");
   return `<section class="hm">
-    <p class="hm-k">Options on AI chip rent</p>
+    <p class="hm-k">Price protection for AI chip rent</p>
     <h1>${NARRATIVE}</h1>
     <p class="hm-s">Hourly shows what an AI chip costs to rent, by the hour, and lets you fix next week's price. Fully backed, settled on Solana.</p>
-    <div class="hm-a"><button class="hm-b on" data-go="desk">Trade</button><button class="hm-b" data-go="docs">Docs</button></div>
+    <div class="hm-a"><button class="hm-b on" data-go="desk">Trade</button><a class="hm-b" href="freeze">Cap your GPU bill</a><button class="hm-b" data-go="docs">Docs</button></div>
     <div class="hm-r">${chips}</div>
+    ${hmCap()}
   </section>`;
 }
 function bindHm() {
@@ -1696,6 +1790,8 @@ function docsView() {
     <p class="dc-l">${NARRATIVE} Renting an AI chip has a price per hour. It moves. Hourly lets you bet on it or hedge it.</p>
     <h2>How a ticket works</h2>
     <ol><li>Pick a chip (H100, H200, B200, A100) and a rent level.</li><li>Choose <b>higher</b> or <b>lower</b> than that level on the settle date.</li><li>Get a firm price. You approve it in your wallet.</li><li>An oracle averages the Ornn index at expiry. The program pays the winner from escrow.</li></ol>
+    <h2>Cap your GPU bill</h2>
+    <p>If you rent GPUs, <a href="freeze">Cap</a> shows the most you would pay per GPU-hour next month. Say how many GPUs you rent and for how many hours a day. You pay once. If the monthly average rent rises above the cap price, you are paid the gap, up to a limit. If it stays below, you lose only what you paid. The full payout sits in escrow before you pay.</p>
     <h2>The House</h2>
     <p>The House is the counterparty on every ticket. Anyone can underwrite it through the weekly vault and earn the premium. The House page shows its risk and edge per chip.</p>
     <h2>For agents</h2>
@@ -1704,12 +1800,12 @@ function docsView() {
 GET /hourly/api/agent/prepare?chip=H100_SXM&amp;side=higher&amp;strike=2.65&amp;date=2026-10-11&amp;amount=10
 /hourly/llms.txt</pre>
     <h2>Fees and limits</h2>
-    <ul><li>Fee: ${fee}.</li><li>Money in use: ${live}.</li><li>Every ticket is fully collateralised in escrow.</li><li>Not audited. Ornn needs a settlement licence before real money.</li></ul>
+    <ul><li>Fee: ${fee}.</li><li>Money in use: ${live}.</li><li>Every ticket is fully collateralised in escrow.</li><li>Cap trades are limited to 50 GPUs each.</li><li>Not audited. Ornn needs a settlement licence before real money.</li></ul>
   </article>`;
 }
 
 function render() {
-  if (!["home", "desk", "house", "docs"].includes(S.view)) S.view = "desk";
+  if (!["home", "desk", "house", "docs", "hedge"].includes(S.view)) S.view = "desk";
   const views = { home: hmView, docs: docsView, desk: deskView, house: houseView, strat: stratView, hedge: hedgeView, activity: activityView, earn: earnView };
   CHS.W = 560; CHS.H = 300;
   $("#desk").innerHTML = views[S.view]();
@@ -1717,6 +1813,7 @@ function render() {
   document.body.classList.add("dk");
   document.body.classList.toggle("onhm", S.view === "home" || S.view === "docs");
   document.body.classList.toggle("ondesk", S.view === "desk" || S.view === "strat" || S.view === "house");
+  document.body.classList.toggle("onterm", S.view === "desk");
   ({ home: bindHm, docs: () => {}, desk: bindDesk, house: bindHouse, strat: bindStrat, hedge: bindHedge, activity: bindActivity, earn: bindEarn })[S.view]();
   tickClocks();
 }

@@ -160,7 +160,7 @@ const routes = {
     const ix = await indexSummary();
     const open = (await market.markets()).filter((m) => m.door === "predict" && m.status === "open");
     return {
-      about: "Hourly: options on AI-chip rental prices (Ornn OCPI), Solana, test money unless cluster says mainnet. Agents read here and hand the user a link; the user reviews, gets a firm price and signs. No agent can move funds.",
+      about: "Hourly: price protection for AI-chip rental prices (hourly rent caps and bets) (Ornn OCPI), Solana, test money unless cluster says mainnet. Agents read here and hand the user a link; the user reviews, gets a firm price and signs. No agent can move funds.",
       cluster: venue.CLUSTER, asOf: new Date().toISOString(),
       chips: ix.map((g) => ({
         code: g.code, label: g.label, last: g.last, lastDate: g.lastDate, change7d: g.chg7, change30d: g.chg30,
@@ -248,6 +248,7 @@ const server = http.createServer(async (req, res) => {
   res.__gzip = /\bgzip\b/.test(String(req.headers["accept-encoding"] || ""));
   const url = new URL(req.url, "http://localhost");
   const key = `${req.method} ${url.pathname}`;
+  if ((req.method === "GET" || req.method === "HEAD") && /^\/(freeze|cap)\/?$/.test(url.pathname)) return serveStatic(req, res, "/freeze.html");
   const handler = routes[key];
   if (!handler) {
     if (url.pathname.startsWith("/api/")) return send(res, 404, { error: "not found" });

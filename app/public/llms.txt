@@ -1,6 +1,6 @@
 # Hourly
 
-> Options on the hourly rental price of AI chips (H100, H200, B200, A100), priced off the Ornn OCPI index and settled on Solana by oracle. Test money unless the cluster says mainnet.
+> Price protection and bets on the hourly rental price of AI chips (H100, H200, B200, A100), priced off the Ornn OCPI index and settled on Solana by oracle. Test money unless the cluster says mainnet.
 
 For agents: read quotes, then hand the user a link. The user reviews, gets a firm price and signs. No agent can move funds.
 
@@ -11,3 +11,5 @@ For agents: read quotes, then hand the user a link. The user reviews, gets a fir
 - House (the counterparty, risk and edge per chip): /hourly/ then House tab
 
 Use: hedge next week's GPU rent, or read the market's chance that rent stays above a strike.
+
+Cap entry: a monthly rate cap for teams that rent GPUs. Page: /hourly/freeze (same as /hourly/cap). Say how many GPUs and hours a day; it shows the most they would pay per GPU-hour next month and the one-time price. Hand the user the link; the cap ticket opens pre-filled. The other side is the weekly vault, else Hourly's own desk; the full payout is in escrow before the user pays.
