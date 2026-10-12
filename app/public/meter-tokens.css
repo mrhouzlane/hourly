@@ -3,12 +3,12 @@
   --hz-enamel: #d8d5ce;
   --hz-black: #151515;
   --hz-paper: #f3f0ea;
-  --hz-signal: #ff5a1f;
+  --hz-signal: #2350ff;
   --hz-ink-2: #3b3935;
   --hz-ink-3: #6a665e;
   --hz-enamel-deep: #c4c0b7;
-  --hz-red: #b3261e;
-  --hz-green: #2e6b3a;
+  --hz-red: #14286b;
+  --hz-green: #2350ff;
 
   --bg: var(--hz-enamel);
   --surface: var(--hz-paper);

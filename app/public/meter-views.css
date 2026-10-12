@@ -326,7 +326,7 @@ html body.sk .spec-id span { border:1px solid var(--hz-black); border-left:0; pa
 html body.sk .pcol h2 { font:500 var(--fs-3)/1.35 var(--font-mono)!important; letter-spacing:0; }
 html body.sk .readout { background:var(--hz-black); color:var(--hz-paper); padding:var(--sp-3) var(--sp-4); display:grid; gap:2px; }
 html body.sk .readout .lab { font:400 11px var(--font-mono); letter-spacing:var(--track-label); color:#9a978f; }
-html body.sk .readout .num { font:500 44px/1 var(--font-mono); color:var(--hz-signal,#ff5a1f); letter-spacing:-.02em; }
+html body.sk .readout .num { font:500 44px/1 var(--font-mono); color:var(--hz-signal,#2350ff); letter-spacing:-.02em; }
 html body.sk dl.spec { margin:0; border:var(--border) solid var(--hz-black); font:400 var(--fs-1) var(--font-mono); }
 html body.sk dl.spec > div { display:flex; align-items:baseline; gap:6px; padding:6px var(--sp-3); }
 html body.sk dl.spec > div + div { border-top:1px solid var(--hz-black); }

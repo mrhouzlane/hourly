@@ -58,5 +58,5 @@ Papertrade mints its token to the player who loses (UNVERIFIED: 100 PAPER per $1
 - **Index manipulation.** Ornn's print is a third party daily index; contracts settle on the window mean, which raises the cost of moving one day. Papertrade's equivalent is Hyperliquid mid manipulation (UNVERIFIED).
 - **Single relayer.** The venue maker key co-signs every fill, as Papertrade's relayer does. If it is down, nothing trades; funds in escrow are unaffected. Rail 3 reduces this once outside quoters sign their own fills.
 - **Print front-running.** The 19:55 UTC cutoff exists; it assumes Ornn does not leak early.
-- **Licence.** Ornn's terms require a settlement licence before real money. Request sent; not granted.
+- **Licence.** Ornn's terms require a settlement licence before real money. Request drafted in docs/OUTREACH.md, not yet sent, so not granted.
 - **Audit.** None. Internal review in `docs/SECURITY_REVIEW.md`.

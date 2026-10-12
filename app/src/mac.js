@@ -222,11 +222,13 @@ function slidePill(box, key) {
 
 // ---------- menu bar ----------
 function renderMenu() {
-  const g = S.index.find((x) => x.code === "H100_SXM");
+  const test = !(S.status && S.status.cluster === "mainnet-beta");
+  const last = S.index.length ? S.index[0].lastDate : "";
   $("#menubar").innerHTML = `
     <button data-view="home" class="brand" title="Hourly: Trade" aria-label="Hourly"><img src="mark.svg" alt="H">ourly</button>
-    ${[["desk", "Trade"], ["house", "House"], ["docs", "Docs"]].map(([v, l]) => `<button data-view="${v}" class="${S.view === v ? "on" : ""}">${l}</button>`).join("")}
-        <span class="spacer"></span>
+    <div class="mn-nav">${[["desk", "Trade"], ["house", "House"], ["docs", "Docs"]].map(([v, l], i) => `<button data-view="${v}" class="${S.view === v ? "on" : ""}"><i>[${i + 1}]</i> ${l}</button>`).join("")}</div>
+    <span class="spacer"></span>
+    <span class="mn-live"><span class="mn-tag">${test ? "Test money" : "Mainnet"}</span>${S.index.length ? `<span class="mn-ct"><b>${S.index.length}</b> chips, last print ${last ? day(last) : ""}</span>` : ""}</span>
     <button id="wallet-btn">${S.wallet ? `${S.wallet.address.slice(0, 4)}…${S.wallet.address.slice(-4)}` : "Connect"}</button>`;
   slidePill($("#menubar"), "menu");
   $$("#menubar [data-view]").forEach((b) => b.addEventListener("click", () => {
@@ -238,6 +240,16 @@ function renderMenu() {
       <div class="actions"><button class="btn default" id="dc">Disconnect</button></div>`,
     (m, close) => { $("#dc", m).addEventListener("click", async () => { await S.wallet.disconnect(); await setWallet(null); close(); }); });
   });
+  renderChrome();
+}
+const RIBBON = { home: "Price protection for AI chip rent", desk: "AI chip rent: what it costs by the hour", house: "The House: the other side of every ticket", docs: "How Hourly works" };
+function renderChrome() {
+  const rb = $("#ribbon"); if (rb) rb.textContent = RIBBON[S.view] || RIBBON.desk;
+  const bb = $("#botbar"); if (!bb) return;
+  const prints = S.index.reduce((n, g) => n + (g.history || []).length, 0);
+  const first = S.index.map((g) => (g.history || [])[0]).filter(Boolean).map((h) => h[0]).sort()[0];
+  bb.innerHTML = prints ? `<span><b>${prints.toLocaleString("en-US")}</b> Ornn daily rent prints across ${S.index.length} chips${first ? ` since ${day(first)}` : ""}.</span> <button class="mn-dl" data-view="docs">How this is measured</button><span class="spacer"></span><span class="mn-r">Test flow. Not audited. Not financial advice.</span>` : "";
+  $$("#botbar [data-view]").forEach((b) => b.addEventListener("click", () => { S.view = b.dataset.view; renderMenu(); render(); window.scrollTo(0, 0); }));
 }
 
 function windowShell(title, body) {
@@ -1326,7 +1338,7 @@ function deskView() {
   const t = S.t, g = S.index.find((x) => x.code === t.gpu);
   if (!g) return '<section class="tdesk"><p class="tempty">Loading the index.</p></section>';
   const pane = S.pane || "chart";
-  CHS.W = 1100; CHS.H = innerWidth > 980 ? Math.max(240, Math.min(460, innerHeight - 440)) : 300;
+  CHS.W = 1100; CHS.H = innerWidth > 980 ? Math.max(220, Math.min(460, innerHeight - 525)) : 300;
   const pills = GPU_ORDER.map((c) => S.index.find((x) => x.code === c)).filter(Boolean).map((x) => `<button class="apill ${x.code === t.gpu ? "on" : ""}" data-gpu="${x.code}"><b>${esc(x.label)}</b><span>${usd(x.last)}</span><em class="${x.chg7 >= 0 ? "up" : "dn"}">${x.chg7 >= 0 ? "+" : ""}${(x.chg7 * 100).toFixed(2)}%</em></button>`).join("");
   const ir = intelRow(g), ds = deskStats(g);
   const stats = [["30d vol", ir.vol === null ? "n/a" : (ir.vol * 100).toFixed(0) + "%"], ds[1], ds[2], ds[4]].map(([k, v]) => `<span class="spill"><i>${k}</i><b>${v}</b></span>`).join("");
@@ -1612,13 +1624,13 @@ function curveSvg(c) {
   const W = 560, H = 150, v = c.map((d) => d.v), lo = Math.min(0, ...v), hi = Math.max(0, ...v), r = hi - lo || 1;
   const X = (i) => 8 + (i / (c.length - 1)) * (W - 16), Y = (y) => 10 + (1 - (y - lo) / r) * (H - 24);
   const pts = c.map((d, i) => `${X(i).toFixed(1)},${Y(d.v).toFixed(1)}`).join(" L");
-  return `<svg viewBox="0 0 ${W} ${H}" class="hs-svg"><line x1="8" x2="${W - 8}" y1="${Y(0)}" y2="${Y(0)}" stroke="var(--dk-bd)" stroke-dasharray="3 3"/><path d="M${pts}" fill="none" stroke="#151515" stroke-width="1.8" stroke-linejoin="round"/><circle cx="${X(c.length - 1)}" cy="${Y(v[v.length - 1])}" r="3.4" fill="#ff5a1f"/></svg>`;
+  return `<svg viewBox="0 0 ${W} ${H}" class="hs-svg"><line x1="8" x2="${W - 8}" y1="${Y(0)}" y2="${Y(0)}" stroke="var(--dk-bd)" stroke-dasharray="3 3"/><path d="M${pts}" fill="none" stroke="#151515" stroke-width="1.8" stroke-linejoin="round"/><circle cx="${X(c.length - 1)}" cy="${Y(v[v.length - 1])}" r="3.4" fill="#2350ff"/></svg>`;
 }
 function heatHtml(b) {
   if (!b.rows.length) return '<p class="hs-n">No open tickets.</p>';
   const mx = Math.max(1, ...b.rows.flatMap((c) => c.sh.map(Math.abs)));
   const head = b.SH.map((x) => `<th class="${x === 0 ? "now" : ""}">${x > 0 ? "+" : ""}${Math.round(x * 100)}%</th>`).join("");
-  const rows = b.rows.map((c) => `<tr><th class="hm-c">${esc(c.gpu)}</th>${c.sh.map((v) => `<td style="background:${v >= 0 ? `rgba(45,95,58,${(0.1 + 0.55 * Math.abs(v) / mx).toFixed(2)})` : `rgba(139,32,32,${(0.1 + 0.55 * Math.abs(v) / mx).toFixed(2)})`}">${sgn(v).replace(".00", "")}</td>`).join("")}</tr>`).join("");
+  const rows = b.rows.map((c) => `<tr><th class="hm-c">${esc(c.gpu)}</th>${c.sh.map((v) => `<td style="background:${v >= 0 ? `rgba(35,80,255,${(0.08 + 0.38 * Math.abs(v) / mx).toFixed(2)})` : `rgba(20,40,107,${(0.08 + 0.38 * Math.abs(v) / mx).toFixed(2)})`}">${sgn(v).replace(".00", "")}</td>`).join("")}</tr>`).join("");
   return `<table class="hs-hm"><tr><th></th>${head}</tr>${rows}</table>`;
 }
 // The ruler is the Hourly mark: 60 ticks, one per minute.
@@ -1627,7 +1639,7 @@ function dialSvg(b) {
   const R = 78, C = 100, left = b.nextExp ? Math.max(0, b.nextExp - Date.now() / 1000) : 0, f = b.nextExp ? 1 - Math.min(1, left / 86400) : 0;
   const ticks = Array.from({ length: 60 }, (_, i) => {
     const a = (i / 60) * Math.PI * 2 - Math.PI / 2, big = i % 5 === 0, r1 = R - (big ? 12 : 7), on = i / 60 < f;
-    return `<line x1="${(C + Math.cos(a) * r1).toFixed(1)}" y1="${(C + Math.sin(a) * r1).toFixed(1)}" x2="${(C + Math.cos(a) * R).toFixed(1)}" y2="${(C + Math.sin(a) * R).toFixed(1)}" stroke="${on ? "#ff5a1f" : "#4a4a46"}" stroke-width="${big ? 2.2 : 1.2}" stroke-linecap="round"/>`;
+    return `<line x1="${(C + Math.cos(a) * r1).toFixed(1)}" y1="${(C + Math.sin(a) * r1).toFixed(1)}" x2="${(C + Math.cos(a) * R).toFixed(1)}" y2="${(C + Math.sin(a) * R).toFixed(1)}" stroke="${on ? "#2350ff" : "#4a4a46"}" stroke-width="${big ? 2.2 : 1.2}" stroke-linecap="round"/>`;
   }).join("");
   const t = b.nextExp ? countdown(b.nextExp) : "none";
   return `<svg viewBox="0 0 200 200" class="hs-dial">${ticks}<text x="100" y="92" text-anchor="middle" class="d-l">NEXT EXPIRY</text><text x="100" y="116" text-anchor="middle" class="d-v">${esc(t)}</text><text x="100" y="134" text-anchor="middle" class="d-l">${b.openN} open</text></svg>`;
@@ -1645,11 +1657,11 @@ function payoffSvg(c, b) {
   const xs = [0.8, 0.9, 1, 1.1, 1.2].map((k) => `<text x="${X(last * k)}" y="${H - 20}" text-anchor="middle" class="hs-ax">${usd(last * k)}</text>`).join("");
   const strikes = [...new Set(ks)].map((k) => `<path d="M${X(k)},${H - 36} l-5,9 h10 z" fill="#151515"/>`).join("");
   return `<svg viewBox="0 0 ${W} ${H}" class="hs-svg"><defs><clipPath id="cu"><rect x="0" y="0" width="${W}" height="${y0}"/></clipPath><clipPath id="cd"><rect x="0" y="${y0}" width="${W}" height="${H}"/></clipPath></defs>
-    ${grid}<path d="${area}" fill="rgba(45,95,58,.28)" clip-path="url(#cu)"/><path d="${area}" fill="rgba(139,32,32,.26)" clip-path="url(#cd)"/>
+    ${grid}<path d="${area}" fill="rgba(35,80,255,.20)" clip-path="url(#cu)"/><path d="${area}" fill="rgba(20,40,107,.20)" clip-path="url(#cd)"/>
     <path d="${line}" fill="none" stroke="#151515" stroke-width="2.2" stroke-linejoin="round"/>
     ${xs}${strikes}
-    <line x1="${X(last)}" x2="${X(last)}" y1="${T - 6}" y2="${H - B + 4}" stroke="#ff5a1f" stroke-width="1.6" stroke-dasharray="4 4"/>
-    <rect x="${X(last) - 34}" y="${T - 20}" width="68" height="18" rx="4" fill="#ff5a1f"/><text x="${X(last)}" y="${T - 7}" text-anchor="middle" class="hs-tag">NOW ${usd(last)}</text></svg>`;
+    <line x1="${X(last)}" x2="${X(last)}" y1="${T - 6}" y2="${H - B + 4}" stroke="#2350ff" stroke-width="1.6" stroke-dasharray="4 4"/>
+    <rect x="${X(last) - 34}" y="${T - 20}" width="68" height="18" rx="4" fill="#2350ff"/><text x="${X(last)}" y="${T - 7}" text-anchor="middle" class="hs-tag">NOW ${usd(last)}</text></svg>`;
 }
 function expiryStrip(b) {
   const days = Array.from({ length: 7 }, (_, i) => { const d = new Date(Date.now() + i * 864e5).toISOString().slice(0, 10); return b.exp.find((e) => e.d === d) || { d, qty: 0, prem: 0 }; });
@@ -1666,7 +1678,7 @@ function recordSvg(b) {
 }
 function donutSvg(qs) {
   const C = 2 * Math.PI * 42; let off = 0;
-  const arcs = qs.filter((q) => q.share > 0).map((q, i) => { const len = q.share * C, el = `<circle cx="60" cy="60" r="42" fill="none" stroke="${i ? "#ff5a1f" : "#151515"}" stroke-width="14" stroke-dasharray="${len} ${C - len}" stroke-dashoffset="${-off}" transform="rotate(-90 60 60)"/>`; off += len; return el; }).join("");
+  const arcs = qs.filter((q) => q.share > 0).map((q, i) => { const len = q.share * C, el = `<circle cx="60" cy="60" r="42" fill="none" stroke="${i ? "#2350ff" : "#151515"}" stroke-width="14" stroke-dasharray="${len} ${C - len}" stroke-dashoffset="${-off}" transform="rotate(-90 60 60)"/>`; off += len; return el; }).join("");
   const top = qs[0];
   return `<svg viewBox="0 0 120 120" class="hs-donut"><circle cx="60" cy="60" r="42" fill="none" stroke="#eceae4" stroke-width="14"/>${arcs}<text x="60" y="58" text-anchor="middle" class="dn-v">${top ? pct(top.share) : "0%"}</text><text x="60" y="74" text-anchor="middle" class="dn-l">${top ? esc(top.name.replace("Venue ", "").toLowerCase()) : ""}</text></svg>`;
 }
@@ -1685,7 +1697,7 @@ function rentSvg(g, list) {
   const line = h.map((d, i) => `${i ? "L" : "M"}${X(i).toFixed(1)},${Y(d[1]).toFixed(1)}`).join(" ");
   const grid = [0, 1, 2, 3, 4].map((i) => { const y = lo + ((hi - lo) * i) / 4; return `<line x1="${L}" x2="${W - R}" y1="${Y(y)}" y2="${Y(y)}" stroke="#ecebe6"/><text x="${W - R + 8}" y="${Y(y) + 3}" class="hs-ax">${usd(y)}</text>`; }).join("");
   const agg = {}; list.forEach((x) => { const k = `${x.strike}|${x.direction}`; (agg[k] = agg[k] || { s: x.strike, d: x.direction, q: 0 }).q += x.qty; });
-  const kl = Object.values(agg).map((k) => `<line x1="${L}" x2="${W - R}" y1="${Y(k.s)}" y2="${Y(k.s)}" stroke="#ff5a1f" stroke-dasharray="4 4"/><rect x="${W - R + 2}" y="${Y(k.s) - 9}" width="52" height="18" rx="4" fill="#ff5a1f"/><text x="${W - R + 28}" y="${Y(k.s) + 4}" text-anchor="middle" class="hs-tag">${usd(k.s)}</text><rect x="${L + 4}" y="${Y(k.s) + 6}" width="${String(k.q + k.d).length * 7 + 56}" height="18" rx="4" fill="#fff"/><text x="${L + 10}" y="${Y(k.s) + 19}" class="hs-ax">${k.q} ${k.d} sold</text>`).join("");
+  const kl = Object.values(agg).map((k) => `<line x1="${L}" x2="${W - R}" y1="${Y(k.s)}" y2="${Y(k.s)}" stroke="#2350ff" stroke-dasharray="4 4"/><rect x="${W - R + 2}" y="${Y(k.s) - 9}" width="52" height="18" rx="4" fill="#2350ff"/><text x="${W - R + 28}" y="${Y(k.s) + 4}" text-anchor="middle" class="hs-tag">${usd(k.s)}</text><rect x="${L + 4}" y="${Y(k.s) + 6}" width="${String(k.q + k.d).length * 7 + 56}" height="18" rx="4" fill="#fff"/><text x="${L + 10}" y="${Y(k.s) + 19}" class="hs-ax">${k.q} ${k.d} sold</text>`).join("");
   const lp = [X(h.length - 1), Y(v[v.length - 1])];
   return `<svg viewBox="0 0 ${W} ${H}" class="hs-svg">${grid}${kl}<path d="${line}" fill="none" stroke="#151515" stroke-width="1.6" stroke-linejoin="round"/><circle cx="${lp[0]}" cy="${lp[1]}" r="4" fill="#151515"/><text x="${L}" y="${H - 6}" class="hs-ax">${h[0][0].slice(5)}</text><text x="${W - R}" y="${H - 6}" text-anchor="end" class="hs-ax">${h[h.length - 1][0].slice(5)}</text></svg>`;
 }
@@ -1713,7 +1725,7 @@ function houseView() {
   const tot = chip ? chip.hi + chip.lo : 0;
   const split = chip ? `<div class="hs-split"><span>Labs hedging up <b>${chip.hi}</b></span><div class="hs-sp"><i style="width:${tot ? (chip.hi / tot) * 100 : 50}%"></i></div><span><b>${chip.lo}</b> Owners hedging down</span></div>` : "";
   const dep = next ? `<div class="hs-dep"><div class="hs-dr"><span>$</span><input id="hdep" inputmode="decimal" value="1000"><button id="hdep-go">Underwrite</button></div><small id="hd-st">${esc(weekLabel(next.depositEnd, next.epochEnd))} · closes in ${countdown(next.depositEnd)}</small></div>` : "";
-  const fills = qs.map((q) => `<div class="hs-fl"><i style="background:${q.via === "vault" ? "#ff5a1f" : "#151515"}"></i><span>${esc(q.name)}</span><b>${q.fills}</b></div>`).join("");
+  const fills = qs.map((q) => `<div class="hs-fl"><i style="background:${q.via === "vault" ? "#2350ff" : "#151515"}"></i><span>${esc(q.name)}</span><b>${q.fills}</b></div>`).join("");
   return `<section class="hse">
     <div class="hs-h"><h1>The House</h1><p>The counterparty on every GPU rent ticket. Buyers bet on where the hourly price of renting one AI chip lands (H100, H200, B200, A100, Ornn index). The House sells those tickets and keeps the premium.</p></div>
     ${chipBoard(b)}
@@ -1759,21 +1771,29 @@ function hmCap() {
   const g = (S.index || []).find((x) => x.code === m.underlying), name = g ? g.label : m.underlying;
   const mo = new Date(m.windowStart + "T00:00:00Z").toLocaleString("en-US", { month: "long", timeZone: "UTC" });
   const per = m.model.ask * 1.01, ceil = m.strike + per / m.units, usd = (n, d = 2) => "$" + n.toFixed(d);
-  return `<div class="hm-x">
-    <p class="hm-xk">A real quote, live from the desk</p>
-    <p class="hm-xl">A team renting 1 ${esc(name)} all of ${mo} pays at most <b>${usd(ceil)}</b> per GPU-hour. It pays <b>${usd(per)}</b> once. If the monthly average rent rises above <b>${usd(m.strike)}</b>, the gap is paid back, up to <b>${usd(m.cap)}</b> an hour.</p>
-    <p class="hm-xf">Who takes the other side: the weekly vault, else Hourly's own desk. Why not a perp: no margin, no liquidation. The full payout is in escrow before you pay and your loss is capped at the price paid.</p>
+  return `<div class="hm-x mbr">
+    <p class="hm-xk"><span>A real quote, live from the desk</span><i>[01]</i></p>
+    <div class="hm-xn">${usd(ceil)}<small>most a team pays per ${esc(name)} GPU-hour in ${mo}</small></div>
+    <p class="hm-xl">It pays <b>${usd(per)}</b> once. If the monthly average rent rises above <b>${usd(m.strike)}</b>, the gap is paid back, up to <b>${usd(m.cap)}</b> an hour.</p>
+    <p class="hm-xf">The other side: the weekly vault, else Hourly's own desk. No margin, no liquidation. The full payout is in escrow before you pay and your loss is capped at the price paid.</p>
   </div>`;
 }
 function hmView() {
-  const chips = S.index.map((g) => `<button class="hm-chip" data-go="desk" data-gpu="${g.code}"><b>${esc(g.label)}</b><span>$${g.last.toFixed(2)}<i>/hr</i></span></button>`).join("");
+  const h = S.index.find((x) => x.code === "H100_SXM") || S.index[0];
+  if (!h) return '<section class="hm"><p class="hm-k">Loading the index.</p></section>';
+  const ledger = S.index.map((g) => `<button class="hl" data-go="desk" data-gpu="${g.code}"><span class="hl-n">${esc(g.label)}</span><span class="hl-s">${intelSpark(g.history || [])}</span><span class="hl-c ${g.chg7 >= 0 ? "up" : "dn"}">${pctSgn(g.chg7)}</span><b>$${g.last.toFixed(2)}<small>/hr</small></b></button>`).join("");
   return `<section class="hm">
-    <p class="hm-k">Price protection for AI chip rent</p>
-    <h1>${NARRATIVE}</h1>
-    <p class="hm-s">Hourly shows what an AI chip costs to rent, by the hour, and lets you fix next week's price. Fully backed, settled on Solana.</p>
-    <div class="hm-a"><button class="hm-b on" data-go="desk">Trade</button><a class="hm-b" href="freeze">Cap your GPU bill</a><button class="hm-b" data-go="docs">Docs</button></div>
-    <div class="hm-r">${chips}</div>
-    ${hmCap()}
+    <div class="hm-l">
+      <p class="hm-k">${esc(h.label)} rent per GPU-hour</p>
+      <div class="hm-big">$${h.last.toFixed(2)}</div>
+      <p class="hm-cap">Ornn daily print, ${day(h.lastDate)}. <span class="${h.chg7 >= 0 ? "up" : "dn"}">${pctSgn(h.chg7)}</span> this week.</p>
+      <h1>${NARRATIVE}</h1>
+      <p class="hm-s">Hourly shows what an AI chip costs to rent, by the hour, and lets you fix next week's price. Fully backed, settled on Solana.</p>
+      <div class="hm-a"><button class="hm-b on" data-go="desk">Trade</button><button class="hm-b" data-go="docs">Docs</button></div>
+    </div>
+    <div class="hm-rt">
+      <div class="mcard"><div class="mch"><span>Chips</span><i>[00]</i></div><div class="hm-lg">${ledger}</div></div>
+    </div>
   </section>`;
 }
 function bindHm() {
@@ -1790,8 +1810,8 @@ function docsView() {
     <p class="dc-l">${NARRATIVE} Renting an AI chip has a price per hour. It moves. Hourly lets you bet on it or hedge it.</p>
     <h2>How a ticket works</h2>
     <ol><li>Pick a chip (H100, H200, B200, A100) and a rent level.</li><li>Choose <b>higher</b> or <b>lower</b> than that level on the settle date.</li><li>Get a firm price. You approve it in your wallet.</li><li>An oracle averages the Ornn index at expiry. The program pays the winner from escrow.</li></ol>
-    <h2>Cap your GPU bill</h2>
-    <p>If you rent GPUs, <a href="freeze">Cap</a> shows the most you would pay per GPU-hour next month. Say how many GPUs you rent and for how many hours a day. You pay once. If the monthly average rent rises above the cap price, you are paid the gap, up to a limit. If it stays below, you lose only what you paid. The full payout sits in escrow before you pay.</p>
+    <h2>How this is measured</h2>
+    <p>Rent is the Ornn OCPI daily print for each chip. Realised vol is the standard deviation of daily log changes over 30 days, times the square root of 365. The chance shown on each strike is a model, not a measurement. Each row on the Venues tab was read from that venue's own page and carries its date.</p>
     <h2>The House</h2>
     <p>The House is the counterparty on every ticket. Anyone can underwrite it through the weekly vault and earn the premium. The House page shows its risk and edge per chip.</p>
     <h2>For agents</h2>
