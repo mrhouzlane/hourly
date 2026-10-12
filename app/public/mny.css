@@ -283,3 +283,7 @@ table, .tlines b, .thero b, .mn-bot, .hl-c { font-variant-numeric:tabular-nums; 
 .ptab td, .ptab th { padding-top:6px!important; padding-bottom:6px!important; }
 .hs-hm td { border-radius:0; }
 .hm-big, .tchart .px { letter-spacing:-.04em; }
+
+/* live tick: value that just changed */
+.flash { animation: hflash .9s ease-out; }
+@keyframes hflash { 0% { background: rgba(35,80,255,.28); } 100% { background: transparent; } }

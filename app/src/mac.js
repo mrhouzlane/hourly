@@ -1863,10 +1863,27 @@ async function refreshActivity() { try { S.activity = await api("activity"); } c
   store.set("hourly.boot", JSON.stringify({ status: S.status, index: S.index, markets: S.markets, vaults: S.vaults, activity: S.activity }));
   (window.requestIdleCallback || setTimeout)(() => registerMetaMask());
   await restoreWallet();
+  // live tick: markets and tape every 4 s, vaults and Ornn index every 30 s. Re-render only when data changed, flash what moved.
+  let n = 0, last = "";
+  const busy = () => document.hidden || document.querySelector(".modal") || (S.view === "desk" && (S.t.quote || S.t.quoting || (document.activeElement && document.activeElement.id === "amt")));
   setInterval(async () => {
-    if (document.querySelector(".modal")) return;
-    if (S.view === "desk" && (S.t.quote || S.t.quoting || (document.activeElement && document.activeElement.id === "amt"))) return;
-    await Promise.all([refreshMarkets(), refreshActivity(), api("index").then((i) => { if (i && i.length) S.index = i; }).catch(() => {})]);
+    if (busy()) return;
+    const slow = ++n % 8 === 0;
+    await Promise.all([
+      api("markets").then((m) => { S.markets = m; }).catch(() => {}),
+      refreshActivity(),
+      slow ? api("vaults").then((v) => { S.vaults = v; }).catch(() => {}) : null,
+      slow ? api("index").then((i) => { if (i && i.length) S.index = i; }).catch(() => {}) : null,
+    ]);
+    if (busy()) return;
+    const sig = JSON.stringify([S.markets, S.activity, S.vaults, S.index]);
+    if (sig === last) return;
+    const first = last === ""; last = sig;
+    if (first) return;
+    const leaves = () => [...document.querySelectorAll("#desk *")].filter((e) => !e.children.length && e.textContent.trim());
+    const before = leaves().map((e) => e.textContent);
     renderMenu(); render();
-  }, 30_000);
+    const after = leaves();
+    if (after.length === before.length) after.forEach((e, i) => { if (e.textContent !== before[i]) { e.classList.add("flash"); setTimeout(() => e.classList.remove("flash"), 900); } });
+  }, 4_000);
 })();
