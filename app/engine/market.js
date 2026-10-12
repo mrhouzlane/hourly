@@ -169,6 +169,15 @@ async function vaultRoom(v, s) {
   return { capAtoms: (d.deposits * BigInt(d.maxSeriesBps)) / 10_000n, short: vs.short, long: vs.long, cash };
 }
 
+// A referral is any other valid wallet; self-referrals and venue keys are dropped.
+function refOf(ref, user) {
+  if (!ref) return null;
+  let r;
+  try { r = new PublicKey(String(ref)); } catch (_) { return null; }
+  if (r.equals(user)) return null;
+  if ([venue.keys.maker, venue.keys.admin, venue.keys.payer, venue.keys.lister].some((k) => k && r.equals(k.publicKey))) return null;
+  return r.toBase58();
+}
 const feeOf = (premiumAtoms) => (premiumAtoms * BigInt(venue.state.feeBps || 0)) / 10_000n;
 
 // A quote is one or more legs filled atomically in one transaction.
@@ -176,7 +185,7 @@ const feeOf = (premiumAtoms) => (premiumAtoms * BigInt(venue.state.feeBps || 0))
 //       "sell" = user writes the contract (posts collateral, receives bid).
 // Each leg is routed to the weekly underwriting vault when it has room under
 // its on-chain cap, otherwise to the venue's desk.
-async function quote({ legs, seriesId, side, qty, owner }) {
+async function quote({ legs, seriesId, side, qty, owner, ref }) {
   if (!legs) legs = [{ series: seriesId, side, qty }];
   if (!Array.isArray(legs) || legs.length < 1 || legs.length > 2) throw venue.httpError(400, "one or two legs per quote");
   let user;
@@ -272,6 +281,7 @@ async function quote({ legs, seriesId, side, qty, owner }) {
     kind: "fill", series: first.series, side: first.side, qty: first.qty, price: first.price, title: outLegs.map((l) => l.title).join(" + "),
     legs: outLegs, pay: Number(payAtoms) / USD, fee: Number(feeAtoms) / USD, receive: Number(receiveAtoms) / USD, lock: Number(lockAtoms) / USD,
     premium: first.premium, collateral: first.collateral, user: user.toBase58(),
+    ref: refOf(ref, user),
   };
   // count accounts this transaction would create for the user (rent paid by the venue)
   const wanted = [chain.ata(quoteMint, user), ...outLegs.filter((l) => l.side === "buy").map((l) => chain.ata(chain.longMintPda(l.series), user))];

@@ -1,0 +1,13 @@
+# Hourly
+
+> Options on the hourly rental price of AI chips (H100, H200, B200, A100), priced off the Ornn OCPI index and settled on Solana by oracle. Test money unless the cluster says mainnet.
+
+For agents: read quotes, then hand the user a link. The user reviews, gets a firm price and signs. No agent can move funds.
+
+- Brief (all chips, strikes, chances, links): /hourly/api/agent/brief
+- Prepare one ticket: /hourly/api/agent/prepare?chip=H100_SXM&side=higher&strike=2.65&date=2026-10-11&amount=10
+- Deep link format: /hourly/?t=<CHIP>~<higher|lower>~<strike>~<YYYY-MM-DD>~<usdc>
+- Chips dashboard (rent, 7d, 30d, vol): /hourly/
+- House (the counterparty, risk and edge per chip): /hourly/ then House tab
+
+Use: hedge next week's GPU rent, or read the market's chance that rent stays above a strike.

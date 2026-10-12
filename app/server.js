@@ -114,7 +114,7 @@ function serveStatic(req, res, urlPath) {
     const h = { "content-type": MIME[ext] || "application/octet-stream", "cache-control": ext === ".html" ? "no-cache" : "public, max-age=300" };
     let out = data;
     if (res.__gzip && [".js", ".css", ".html", ".svg", ".json", ".ttf"].includes(ext)) {
-      const key = `${file}:${data.length}`;
+      const key = `${file}:${require("crypto").createHash("sha1").update(data).digest("hex")}`;
       if (!gz.has(key)) gz.set(key, zlib.gzipSync(data, { level: 9 }));
       out = gz.get(key); h["content-encoding"] = "gzip"; h.vary = "accept-encoding";
     }
@@ -153,6 +153,34 @@ const routes = {
 
   "GET /api/index": async () => indexSummary(),
   "GET /api/activity": async () => feed.build(),
+  "GET /api/stake": async (req, url) => feed.stake(url.searchParams.get("owner") || ""),
+  "GET /api/agent/brief": async (req, url) => {
+    // Read-only, keyless. For bots and agents: prices plus ready-to-sign trade links. The user always signs.
+    const base = (req.headers["x-forwarded-proto"] || "http") + "://" + (req.headers.host || "localhost") + "/hourly/";
+    const ix = await indexSummary();
+    const open = (await market.markets()).filter((m) => m.door === "predict" && m.status === "open");
+    return {
+      about: "Hourly: options on AI-chip rental prices (Ornn OCPI), Solana, test money unless cluster says mainnet. Agents read here and hand the user a link; the user reviews, gets a firm price and signs. No agent can move funds.",
+      cluster: venue.CLUSTER, asOf: new Date().toISOString(),
+      chips: ix.map((g) => ({
+        code: g.code, label: g.label, last: g.last, lastDate: g.lastDate, change7d: g.chg7, change30d: g.chg30,
+        markets: open.filter((m) => m.underlying === g.code).map((m) => ({ strike: m.strike, date: m.windowEnd, higherChance: m.model ? m.model.probItm : null, higherAskPerDollar: m.model ? m.model.ask : null, id: m.id,
+          link: `${base}?t=${g.code}~higher~${m.strike}~${m.windowEnd}~10` })),
+      })),
+      linkFormat: "?t=<CHIP>~<higher|lower>~<strike>~<YYYY-MM-DD>~<usdc>",
+      prepare: "GET /api/agent/prepare?chip=H100_SXM&side=higher&strike=2.65&date=2026-10-11&amount=10",
+    };
+  },
+  "GET /api/agent/prepare": async (req, url) => {
+    const q = url.searchParams, chip = q.get("chip"), side = q.get("side") === "lower" ? "lower" : "higher";
+    const strike = Number(q.get("strike")), date = q.get("date"), amount = Math.min(1000, Math.max(1, Number(q.get("amount")) || 10));
+    const m = (await market.markets()).find((x) => x.door === "predict" && x.status === "open" && x.underlying === chip && x.strike === strike && x.windowEnd === date);
+    if (!m) throw venue.httpError(404, "no open market at that chip, strike and date");
+    const base = (req.headers["x-forwarded-proto"] || "http") + "://" + (req.headers.host || "localhost") + "/hourly/";
+    return { market: { id: m.id, title: m.title, strike: m.strike, date: m.windowEnd }, side, amount,
+      link: `${base}?t=${chip}~${side}~${strike}~${date}~${amount}`, note: "Open the link, connect a wallet, get a firm price, sign. Prices are indicative until quoted." };
+  },
+
   "GET /api/markets": async () => market.markets(),
 
   "GET /api/portfolio": async (req, url) => market.portfolio(url.searchParams.get("owner")),
@@ -170,7 +198,7 @@ const routes = {
 
   "POST /api/quote": async (req, url, body, ip) => {
     if (!allow(`q:${ip}`, 40, 60_000)) throw venue.httpError(429, "Too many quotes. Wait a minute.");
-    return market.quote({ legs: body.legs, seriesId: body.series, side: body.side, qty: body.qty, owner: body.owner });
+    return market.quote({ legs: body.legs, seriesId: body.series, side: body.side, qty: body.qty, owner: body.owner, ref: body.ref });
   },
 
   "GET /api/vaults": async () => {
@@ -195,7 +223,7 @@ const routes = {
     if (r.meta.kind === "fill") {
       for (const l of r.meta.legs || []) venue.state.fills.push({
         tx: r.signature, at: new Date().toISOString(), user: r.meta.user, series: l.series, side: l.side,
-        qty: l.qty, price: l.price, premium: l.premium, fee: l.fee || 0, collateral: l.collateral || 0, via: l.via, title: l.title,
+        qty: l.qty, price: l.price, premium: l.premium, fee: l.fee || 0, collateral: l.collateral || 0, via: l.via, title: l.title, ref: r.meta.ref || null,
       });
       venue.state.fills = venue.state.fills.slice(-5000);
       venue.save();

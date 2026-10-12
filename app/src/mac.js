@@ -4,6 +4,7 @@ import { homeView, bindHome } from "./home.js";
 // level and your date as you pick them. Bundled by esbuild into public/mac.js.
 import { getWallets } from "@wallet-standard/app";
 import nacl from "tweetnacl";
+import * as ST from "./strat.js";
 import bs58 from "bs58";
 
 // ---------- utils ----------
@@ -12,6 +13,7 @@ const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const b64 = (u8) => { let s = ""; for (const b of u8) s += String.fromCharCode(b); return btoa(s); };
 const fromB64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+const odo = (t) => `<span class="odo" aria-label="${t}">${[...t].map((ch, i, a) => `<i class="${i === a.length - 1 && /\d/.test(ch) ? "hot" : ""}${/[\d]/.test(ch) ? "" : " sep"}" aria-hidden="true">${ch}</i>`).join("")}</span>`;
 const usd = (n, dp = 2) => `${n < 0 ? "-" : ""}$${Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: dp, maximumFractionDigits: dp })}`;
 const cents = (p) => `${Math.round(p * 100)}¢`;
 const pct = (p) => `${Math.round(p * 100)}%`;
@@ -33,6 +35,9 @@ function ago(iso) {
   if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
   return `${Math.floor(s / 86400)}d ago`;
 }
+// referral: ?ref=<wallet> on arrival is remembered and sent with every quote
+const refParam = () => { try { return new URLSearchParams(location.search).get("ref"); } catch (_) { return null; } };
+const refFor = () => { const r = store.get("hourly.ref"); return r && S.wallet && r !== S.wallet.address ? r : undefined; };
 const store = {
   get(k) { try { return localStorage.getItem(k); } catch (_) { return null; } },
   set(k, v) { try { localStorage.setItem(k, v); } catch (_) { /* private mode */ } },
@@ -48,10 +53,10 @@ async function api(path, body) {
 
 // ---------- state ----------
 const S = {
-  status: null, index: [], markets: [], vaults: [], activity: null, portfolio: null, wallet: null,
-  view: "home",
+  status: null, index: [], markets: [], vaults: [], activity: null, portfolio: null, stake: null, wallet: null, earnTab: "vault",
+  view: /[?&]t=/.test(location.search) ? "desk" : "home",
   t: { step: 1, gpu: "H100_SXM", side: null, strike: null, seriesId: null, amount: 10, quote: null, hl: 0 },
-  hedge: { gpu: "H100_SXM", role: "own", collar: false },
+  hedge: { gpu: "H100_SXM", role: "own", collar: false, win: null, more: false },
   feedWin: "24h",
 };
 const GPU_ORDER = ["H100_SXM", "H200", "B200", "A100_SXM4"];
@@ -98,7 +103,7 @@ async function setWallet(w) {
   if (w) store.set("hourly.wallet", w.kind === "burner" ? "__burner__" : w.name); else store.del("hourly.wallet");
   renderMenu();
   await refreshPortfolio();
-  if (S.view === "portfolio") render();
+  render();
 }
 async function restoreWallet() {
   const saved = store.get("hourly.wallet");
@@ -219,20 +224,19 @@ function slidePill(box, key) {
 function renderMenu() {
   const g = S.index.find((x) => x.code === "H100_SXM");
   $("#menubar").innerHTML = `
-    <button data-view="home" class="brand" title="Home">Hourly</button>
-    ${[["trade", "Trade"], ["hedge", "Protect & Earn"], ["thesis", "Thesis"]]
-      .map(([k, t]) => `<button data-view="${k}" class="${S.view === k || (k === "hedge" && S.view === "earn") ? "on" : ""}">${t}</button>`).join("")}
-    <span class="spacer"></span>
+    <button data-view="home" class="brand" title="Hourly: Trade" aria-label="Hourly"><img src="mark.svg" alt="H">ourly</button>
+    ${[["desk", "Trade"], ["house", "House"], ["docs", "Docs"]].map(([v, l]) => `<button data-view="${v}" class="${S.view === v ? "on" : ""}">${l}</button>`).join("")}
+        <span class="spacer"></span>
     <button id="wallet-btn">${S.wallet ? `${S.wallet.address.slice(0, 4)}…${S.wallet.address.slice(-4)}` : "Connect"}</button>`;
   slidePill($("#menubar"), "menu");
   $$("#menubar [data-view]").forEach((b) => b.addEventListener("click", () => {
     S.view = b.dataset.view; renderMenu(); render();
   }));
   $("#wallet-btn").addEventListener("click", () => {
-    if (!S.wallet) return walletPicker();
+    if (!S.wallet) return walletPicker(() => {});
     dialog(`<div class="icon">◆</div><b>${esc(S.wallet.name)}</b><p class="mono">${esc(S.wallet.address)}</p>
-      <div class="actions"><button class="btn" id="mt">My trades</button><button class="btn default" id="dc">Disconnect</button></div>`,
-    (m, close) => { $("#mt", m).addEventListener("click", () => { close(); S.view = "portfolio"; renderMenu(); render(); }); $("#dc", m).addEventListener("click", async () => { await S.wallet.disconnect(); await setWallet(null); close(); }); });
+      <div class="actions"><button class="btn default" id="dc">Disconnect</button></div>`,
+    (m, close) => { $("#dc", m).addEventListener("click", async () => { await S.wallet.disconnect(); await setWallet(null); close(); }); });
   });
 }
 
@@ -442,12 +446,8 @@ function chartCaption() {
 }
 
 let CH = null; // geometry for the crosshair
-const smooth = (pts) => pts.map((p, i) => {
-  if (!i) return `M${p[0].toFixed(1)},${p[1].toFixed(1)}`;
-  const a = pts[i - 2] || pts[i - 1], b = pts[i - 1], c = p, d = pts[i + 1] || c;
-  const c1 = [b[0] + (c[0] - a[0]) / 6, b[1] + (c[1] - a[1]) / 6], c2 = [c[0] - (d[0] - b[0]) / 6, c[1] - (d[1] - b[1]) / 6];
-  return `C${c1[0].toFixed(1)},${c1[1].toFixed(1)} ${c2[0].toFixed(1)},${c2[1].toFixed(1)} ${c[0].toFixed(1)},${c[1].toFixed(1)}`;
-}).join(" ");
+const CHS = { W: 560, H: 300 }; // viewBox, the desk sets a wider one
+const smooth = (pts) => pts.map((p, i) => `${i ? "L" : "M"}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ");
 function chartSvg() {
   const t = S.t;
   const g = S.index.find((x) => x.code === t.gpu);
@@ -455,7 +455,7 @@ function chartSvg() {
   const hist = g.history.slice(-(t.range || 30));
   const m = t.seriesId ? S.markets.find((x) => x.id === t.seriesId) : null;
   const dateM = m || (t.step === 3 && datesFor(t.gpu, t.strike)[t.hl]) || null;
-  const W = 560, H = 300, L = 10, R = 64, T = 16, B = 28;
+  const { W, H } = CHS, L = 10, R = 64, T = 16, B = 28;
   const t0 = Date.parse(`${hist[0][0]}T00:00:00Z`);
   const lastT = Date.parse(`${hist[hist.length - 1][0]}T00:00:00Z`);
   const endT = dateM ? Date.parse(`${dateM.windowEnd}T00:00:00Z`) : lastT + Math.max(3, hist.length * 0.18) * 86400e3;
@@ -464,7 +464,7 @@ function chartSvg() {
   if (lv !== null) vals.push(lv);
   if (dateM && dateM.model) vals.push(dateM.model.settleP10, dateM.model.settleP90);
   let lo = Math.min(...vals), hi = Math.max(...vals);
-  const pad = (hi - lo) * 0.14 || 0.1; lo -= pad; hi += pad;
+  const lastV = hist[hist.length - 1][1]; const span = Math.max(hi - lo, lastV * 0.14); const mid0 = (hi + lo) / 2; lo = mid0 - span / 2; hi = mid0 + span / 2; const pad = span * 0.18; lo -= pad; hi += pad;
   const X = (ms) => L + ((ms - t0) / (endT - t0)) * (W - L - R);
   const Y = (v) => T + (1 - (v - lo) / (hi - lo)) * (H - T - B);
   const pts = hist.map((p) => [X(Date.parse(`${p[0]}T00:00:00Z`)), Y(p[1])]);
@@ -472,11 +472,13 @@ function chartSvg() {
   const area = `${line} L${lp[0].toFixed(1)},${base} L${pts[0][0].toFixed(1)},${base} Z`;
   CH = { pts, hist, W, H };
   let zone = "", fan = "", lvl = "", grid = "";
+  let tagP = lp[1], tagL = lv !== null && t.side ? Y(lv) : null;
+  if (tagL !== null && Math.abs(tagL - tagP) < 20) { const mid = (tagL + tagP) / 2, sg = tagL >= tagP ? 1 : -1; tagP = mid - 10 * sg; tagL = mid + 10 * sg; }
   for (let i = 0; i <= 4; i++) { const v = lo + ((hi - lo) * i) / 4, y = Y(v); grid += `<line x1="${L}" x2="${W - R}" y1="${y}" y2="${y}" class="gl"/><text x="${W - R + 8}" y="${y + 3}" class="ax">$${v.toFixed(2)}</text>`; }
   if (lv !== null && t.side) {
     const yl = Y(lv), up = t.side === "higher";
     zone = `<rect class="zone" x="${L}" y="${up ? T : yl}" width="${W - L - R}" height="${Math.max(0, up ? yl - T : base - yl)}" fill="url(#${up ? "zu" : "zd"})"/>`;
-    lvl = `<line class="lvl" x1="${L}" x2="${W - R}" y1="${yl}" y2="${yl}"/><rect x="${W - R + 2}" y="${yl - 9}" width="58" height="18" class="lvlbox"/><text x="${W - R + 31}" y="${yl + 4}" text-anchor="middle" class="lvltx">$${lv.toFixed(2)}</text>`;
+    lvl = `<line class="lvl" x1="${L}" x2="${W - R}" y1="${yl}" y2="${yl}"/><rect x="${W - R + 2}" y="${tagL - 9}" width="58" height="18" class="lvlbox"/><text x="${W - R + 31}" y="${tagL + 4}" text-anchor="middle" class="lvltx">$${lv.toFixed(2)}</text>`;
   }
   let xd = null;
   if (dateM) {
@@ -493,10 +495,10 @@ function chartSvg() {
   const first = hist[0][0].slice(5);
   return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Recent prints with your level and date">
     <defs>
-      <linearGradient id="ag" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#6fa0ff" stop-opacity=".45"/><stop offset="1" stop-color="#6fa0ff" stop-opacity="0"/></linearGradient>
-      <linearGradient id="zu" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2f6bff" stop-opacity=".02"/><stop offset="1" stop-color="#2f6bff" stop-opacity=".5"/></linearGradient>
-      <linearGradient id="zd" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="#2f6bff" stop-opacity=".02"/><stop offset="1" stop-color="#2f6bff" stop-opacity=".5"/></linearGradient>
-      <linearGradient id="fg" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#9fc0ff" stop-opacity=".05"/><stop offset="1" stop-color="#9fc0ff" stop-opacity=".4"/></linearGradient>
+      <linearGradient id="ag" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--hz-paper)" stop-opacity=".45"/><stop offset="1" stop-color="var(--hz-paper)" stop-opacity="0"/></linearGradient>
+      <linearGradient id="zu" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--hz-signal)" stop-opacity=".02"/><stop offset="1" stop-color="var(--hz-signal)" stop-opacity=".5"/></linearGradient>
+      <linearGradient id="zd" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="var(--hz-signal)" stop-opacity=".02"/><stop offset="1" stop-color="var(--hz-signal)" stop-opacity=".5"/></linearGradient>
+      <linearGradient id="fg" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="var(--hz-paper)" stop-opacity=".05"/><stop offset="1" stop-color="var(--hz-paper)" stop-opacity=".4"/></linearGradient>
       <clipPath id="cl"><rect x="0" y="0" width="${W}" height="${H}"/></clipPath>
     </defs>
     ${grid}${zone}
@@ -504,6 +506,7 @@ function chartSvg() {
     ${fan}${lvl}
     <path d="${line}" class="ln" pathLength="1"/>
     <circle cx="${lp[0].toFixed(1)}" cy="${lp[1].toFixed(1)}" r="9" class="halo"/><circle cx="${lp[0].toFixed(1)}" cy="${lp[1].toFixed(1)}" r="4" class="live"/>
+    <rect x="${W - R + 2}" y="${(tagP - 9).toFixed(1)}" width="58" height="18" class="ptag"/><text x="${W - R + 31}" y="${(tagP + 4).toFixed(1)}" text-anchor="middle" class="ptagt">$${hist[hist.length - 1][1].toFixed(2)}</text>
     <text x="${L}" y="${H - 8}" class="ax">${first}</text>
     <line class="xh" x1="0" x2="0" y1="${T}" y2="${base}"/><circle class="xd" r="4.5" cx="-10" cy="-10"/>
   </svg><div class="tip" hidden></div>`;
@@ -593,7 +596,7 @@ async function fetchQuote() {
   if (!m || !S.wallet) return;
   const qty = Math.max(1, Math.floor(t.amount / (sideUnit(m, t.side) * (t.side === "higher" ? 1.01 : 1))));
   try {
-    t.quote = await api("quote", { owner: S.wallet.address, legs: [{ series: m.id, side: t.side === "higher" ? "buy" : "sell", qty }] });
+    t.quote = await api("quote", { owner: S.wallet.address, ref: refFor(), legs: [{ series: m.id, side: t.side === "higher" ? "buy" : "sell", qty }] });
     t.quotedAt = Date.now();
   } catch (e) {
     t.quote = null;
@@ -652,13 +655,13 @@ function distStrip(rows, spot, cur) {
   const W = 1000, H = 84, lo = d.lo, hi = d.hi, X = (v) => Math.max(0, Math.min(W, ((v - lo) / (hi - lo)) * W));
   const bw = W / d.bins.length;
   const bars = d.bins.map((b, i) => `<rect x="${(i * bw + 1).toFixed(1)}" y="${(H - 14 - b * (H - 24)).toFixed(1)}" width="${(bw - 2).toFixed(1)}" height="${(b * (H - 24)).toFixed(1)}"/>`).join("");
-  const ticks = rows.map((m) => `<line x1="${X(m.strike)}" x2="${X(m.strike)}" y1="${H - 14}" y2="${H - 8}" stroke="#6fa0ff"/>`).join("");
+  const ticks = rows.map((m) => `<line x1="${X(m.strike)}" x2="${X(m.strike)}" y1="${H - 14}" y2="${H - 8}" stroke="var(--hz-signal)"/>`).join("");
   const m = rows[cur];
   return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" class="strip" aria-label="Where the model expects the print to land">
     <g class="bars">${bars}</g>${ticks}
-    <line x1="${X(spot)}" x2="${X(spot)}" y1="0" y2="${H - 14}" stroke="#fff" stroke-dasharray="2 3"/>
-    ${m ? `<line class="curline" x1="${X(m.strike)}" x2="${X(m.strike)}" y1="0" y2="${H - 6}" stroke="#6fa0ff" stroke-width="2"/>` : ""}
-    <line x1="0" x2="${W}" y1="${H - 14}" y2="${H - 14}" stroke="rgba(160,190,255,.5)"/></svg>`;
+    <line x1="${X(spot)}" x2="${X(spot)}" y1="0" y2="${H - 14}" stroke="var(--hz-paper)" stroke-dasharray="2 3"/>
+    ${m ? `<line class="curline" x1="${X(m.strike)}" x2="${X(m.strike)}" y1="0" y2="${H - 6}" stroke="var(--hz-signal)" stroke-width="2"/>` : ""}
+    <line x1="0" x2="${W}" y1="${H - 14}" y2="${H - 14}" stroke="var(--hz-ink-3)"/></svg>`;
 }
 function chainView() {
   const c = S.chain, dates = chainDates(c.gpu);
@@ -731,83 +734,192 @@ document.addEventListener("keydown", (e) => {
 });
 
 // ---------- hedge ----------
-function hedgePair(code) {
+// months with both a put and a call open for this GPU, earliest first
+function hedgeWindows(code) {
   const live = S.markets.filter((m) => m.door === "hedge" && m.status === "open" && m.underlying === code && m.model);
+  return [...new Set(live.map((m) => m.windowStart))].sort().filter((w) => live.some((m) => m.kind === "put" && m.windowStart === w) && live.some((m) => m.kind === "call" && m.windowStart === w));
+}
+function hedgePair(code, win) {
+  const wins = hedgeWindows(code);
+  if (!wins.length) return null;
+  const w = wins.includes(win) ? win : wins[0];
+  const live = S.markets.filter((m) => m.door === "hedge" && m.status === "open" && m.underlying === code && m.model && m.windowStart === w);
   const put = live.find((m) => m.kind === "put"), call = live.find((m) => m.kind === "call");
   return put && call ? { put, call } : null;
 }
-function hedgeChart(put, call, role, collar) {
-  const d = (role === "own" ? put : call).model.dist;
-  if (!d) return "";
+const CHART = { W: 560, H: 500, L: 56, R: 12, T: 28, B: 34 };
+function hedgeModel(put, call, role, collar, price) {
+  const own = role === "own", d = (own ? put : call).model.dist, u = put.units;
   const today = lastPrint(put.underlying) || put.strike;
-  const xlo = Math.min(d.lo, put.strike - put.cap * 1.3, today), xhi = Math.max(d.hi, call.strike + call.cap * 1.3, today);
-  const W = 560, H = 260, T = 20, B = 30, X = (v) => ((v - xlo) / (xhi - xlo)) * W, base = H - B;
-  const bw = (d.hi - d.lo) / d.bins.length;
-  const bars = d.bins.map((b, i) => `<rect x="${X(d.lo + i * bw)}" y="${base - b * (base - T) * 0.9}" width="${Math.max(1, X(d.lo + bw) - X(d.lo))}" height="${b * (base - T) * 0.9}" fill="url(#dith)"/>`).join("");
-  const maxPay = Math.max(put.maxPayoff, call.maxPayoff);
-  const Yp = (v) => base - (v / maxPay) * (base - T) * 0.85;
-  const payAt = (s) => role === "own"
+  const xlo = Math.min(d ? d.lo : Infinity, put.strike - put.cap * 1.3, today), xhi = Math.max(d ? d.hi : -Infinity, call.strike + call.cap * 1.3, today);
+  const payAt = (s) => own
     ? Math.min(Math.max(put.strike - s, 0), put.cap) * put.units - (collar ? Math.min(Math.max(s - call.strike, 0), call.cap) * call.units : 0)
     : Math.min(Math.max(s - call.strike, 0), call.cap) * call.units;
-  const xs = [xlo, put.strike - put.cap, put.strike, call.strike, call.strike + call.cap, xhi].sort((a, b) => a - b);
-  const path = xs.map((s, i) => `${i ? "L" : "M"}${X(s).toFixed(1)},${Math.min(H - 4, Yp(payAt(s))).toFixed(1)}`).join(" ");
-  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Payout against the month's average">
-    <defs><pattern id="dith" width="2" height="2" patternUnits="userSpaceOnUse"><rect width="1" height="1" fill="#2f6bff"/><rect x="1" y="1" width="1" height="1" fill="#2f6bff"/></pattern></defs>
-    ${bars}<line x1="0" x2="${W}" y1="${base}" y2="${base}" stroke="#dbe6ff"/>
-    <path d="${path}" fill="none" stroke="#dbe6ff" stroke-width="3"/>
-    <line x1="${X(today)}" x2="${X(today)}" y1="${T}" y2="${base}" stroke="#dbe6ff" stroke-dasharray="1 3"/>
-    <text x="${X(today)}" y="${T - 6}" text-anchor="middle">today $${today.toFixed(2)}</text>
-    <text x="${X(role === "own" ? put.strike : call.strike)}" y="${H - 10}" text-anchor="middle">$${(role === "own" ? put.strike : call.strike).toFixed(2)}</text>
+  const none = (s) => s * u;
+  const withIt = (s) => own ? s * u + payAt(s) - price : s * u - payAt(s) + price;
+  // break-even: first average price where protection stops beating going without
+  let be = null;
+  for (let i = 0, prev = null; i <= 400; i++) {
+    const s = xlo + ((xhi - xlo) * i) / 400, diff = own ? withIt(s) - none(s) : none(s) - withIt(s);
+    if (prev !== null && prev > 0 && diff <= 0) { be = s; break; }
+    prev = diff;
+  }
+  let chance = null;
+  if (d) {
+    const bw = (d.hi - d.lo) / d.bins.length, tot = d.bins.reduce((a, b) => a + b, 0) || 1;
+    const k = own ? put.strike : call.strike;
+    chance = d.bins.reduce((a, b, i) => { const c = d.lo + (i + 0.5) * bw; return a + ((own ? c < k : c > k) ? b : 0); }, 0) / tot;
+  }
+  return { own, d, u, today, xlo, xhi, payAt, none, withIt, be, chance, put, call, collar, price };
+}
+function scrubHtml(m, s) {
+  const lab = m.own ? ["Without protection", "With protection"] : ["Without a cap", "With the cap"];
+  const pay = m.payAt(s);
+  return `<div class="sc-h">If ${monthOf(m.put.windowStart)} averages <b>$${s.toFixed(2)}</b> an hour</div>
+    <div class="sc-g"><div><span>${lab[0]}</span><b>${usd(m.none(s), 0)}</b></div><div><span>${lab[1]}</span><b class="hi">${usd(m.withIt(s), 0)}</b></div><div><span>Protection pays</span><b>${pay > 0 ? "+" + usd(pay, 0) : "$0"}</b></div></div>`;
+}
+function hedgeChart(m) {
+  const { put, call, own, d, today, xlo, xhi, none, withIt, payAt } = m;
+  const { W, H, L, R, T, B } = CHART, pw = W - L - R, base = H - B, ph = base - T;
+  const xs = [...new Set([xlo, put.strike - put.cap, put.strike, call.strike, call.strike + call.cap, xhi])].sort((a, b) => a - b);
+  const vals = xs.flatMap((s) => [none(s), withIt(s)]);
+  let ylo = Math.min(...vals), yhi = Math.max(...vals); const pad = (yhi - ylo) * 0.12; ylo -= pad; yhi += pad;
+  const X = (v) => L + ((v - xlo) / (xhi - xlo)) * pw, Y = (v) => T + (1 - (v - ylo) / (yhi - ylo)) * ph;
+  const pts = (f) => xs.map((s) => `${X(s).toFixed(1)},${Y(f(s)).toFixed(1)}`);
+  const area = `M${pts(withIt).join(" L")} L${pts(none).reverse().join(" L")} Z`;
+  const k = own ? put.strike : call.strike, far = own ? put.strike - put.cap : call.strike + call.cap;
+  let bars = "";
+  if (d) {
+    const bw = (d.hi - d.lo) / d.bins.length, mx = Math.max(...d.bins) || 1;
+    bars = d.bins.map((b, i) => { const c = d.lo + (i + 0.5) * bw, hit = own ? c < k : c > k, h = (b / mx) * 70; return `<rect x="${X(d.lo + i * bw).toFixed(1)}" y="${(base - h).toFixed(1)}" width="${Math.max(1, X(d.lo + bw) - X(d.lo) - 1).toFixed(1)}" height="${h.toFixed(1)}" fill="${hit ? "var(--hz-signal)" : "var(--hz-paper)"}" opacity="${hit ? ".6" : ".2"}"/>`; }).join("");
+  }
+  const yt = [0, 1, 2, 3].map((i) => ylo + ((yhi - ylo) * i) / 3);
+  const grid = yt.map((v) => `<line x1="${L}" x2="${W - R}" y1="${Y(v).toFixed(1)}" y2="${Y(v).toFixed(1)}" stroke="var(--hz-paper)" opacity=".14"/><text x="${L - 8}" y="${(Y(v) + 4).toFixed(1)}" text-anchor="end">$${Math.round(v).toLocaleString("en-US")}</text>`).join("");
+  const zx0 = Math.min(X(k), X(far)), zw = Math.abs(X(k) - X(far));
+  const be = m.be === null ? "" : `<line x1="${X(m.be).toFixed(1)}" x2="${X(m.be).toFixed(1)}" y1="${T}" y2="${base}" stroke="var(--hz-paper)" opacity=".35" stroke-dasharray="2 3"/><circle cx="${X(m.be).toFixed(1)}" cy="${Y(withIt(m.be)).toFixed(1)}" r="4" fill="none" stroke="var(--hz-paper)" stroke-width="1.5"/><text x="${X(m.be).toFixed(1)}" y="${(Y(withIt(m.be)) - 10).toFixed(1)}" text-anchor="${own ? "end" : "start"}">break-even $${m.be.toFixed(2)}</text>`;
+  return `<svg viewBox="0 0 ${W} ${H}" id="hchart" data-ylo="${ylo}" data-yhi="${yhi}" role="img" aria-label="${own ? "Revenue" : "Cost"} against the month's average price, with and without protection">
+    <rect x="${zx0.toFixed(1)}" y="${T}" width="${zw.toFixed(1)}" height="${base - T}" fill="var(--hz-signal)" opacity=".1"/>
+    ${grid}${bars}
+    <path d="${area}" fill="var(--hz-signal)" opacity=".3"/>
+    <path d="M${pts(none).join(" L")}" fill="none" stroke="var(--hz-paper)" stroke-width="2" stroke-dasharray="5 4" opacity=".8"/>
+    <path d="M${pts(withIt).join(" L")}" fill="none" stroke="var(--hz-signal)" stroke-width="3.5" stroke-linejoin="round"/>
+    ${be}
+    <line x1="${X(today).toFixed(1)}" x2="${X(today).toFixed(1)}" y1="${T}" y2="${base}" stroke="var(--hz-paper)" stroke-dasharray="1 3"/>
+    <text x="${(X(today) + (own ? 7 : -7)).toFixed(1)}" y="${T + 12}" text-anchor="${own ? "start" : "end"}">today $${today.toFixed(2)}</text>
+    <text x="${(zx0 + zw / 2).toFixed(1)}" y="${T + 12}" text-anchor="middle" fill="var(--hz-signal)">pays here</text>
+    <line x1="${X(k).toFixed(1)}" x2="${X(k).toFixed(1)}" y1="${base}" y2="${base + 5}" stroke="var(--hz-paper)"/>
+    <text x="${X(k).toFixed(1)}" y="${H - 14}" text-anchor="middle">${own ? "floor" : "cap"} $${k.toFixed(2)}</text>
+    <text x="${L}" y="${H - 14}" text-anchor="start">$${xlo.toFixed(2)}</text>
+    <text x="${W - R}" y="${H - 2}" text-anchor="end">month average, $ per GPU hour</text>
+    <g id="hx" opacity="0"><line id="hx-l" y1="${T}" y2="${base}" stroke="var(--hz-paper)"/><circle id="hx-a" r="4.5" fill="var(--hz-paper)"/><circle id="hx-b" r="5" fill="var(--hz-signal)" stroke="var(--hz-black)" stroke-width="2"/></g>
+    <rect id="hx-hit" x="${L}" y="${T}" width="${pw}" height="${base - T}" fill="transparent"/>
+    <text x="${L}" y="12" fill="var(--hz-signal)">━ with protection</text><text x="${L + 190}" y="12">┅ without</text>
   </svg>`;
 }
+function protectionRows() {
+  const p = S.portfolio;
+  if (!S.wallet) return '<p class="small">Connect a wallet to see your protections.</p>';
+  if (!p) return '<p class="small">Loading.</p>';
+  const title = (r) => `${r.gpu} ${monthOf(r.windowStart)} ${r.kind === "put" ? "floor" : "cap"} at $${r.strike.toFixed(2)}`;
+  const rows = p.rows.filter((r) => r.door === "hedge").map((r) => {
+    let value = "", act = "";
+    if (r.status === "settled") {
+      value = `settled $${r.settled.price.toFixed(4)}`;
+      if (r.long > 0) act += `<button class="btn" data-act="redeem" data-s="${r.id}">Redeem ${usd(r.redeemable)}</button> `;
+      if (r.short > 0) act += `<button class="btn" data-act="reclaim" data-s="${r.id}">Reclaim ${usd(r.reclaimable)}</button>`;
+    } else {
+      value = usd((r.markPerContract ?? 0) * (r.long - r.short));
+      const both = Math.min(r.long, r.short);
+      if (both > 0) act = `<button class="btn" data-act="close" data-s="${r.id}" data-q="${both}">Close ${both}</button>`;
+    }
+    return `<div class="prow"><div class="pt"><b>${esc(title(r))}</b><span class="small">${r.status === "open" ? `settles in ${countdown(r.tradingEnd)}` : esc(r.status)}</span></div><span class="tag ${r.short ? "sold" : "held"}">${r.short ? "sold" : "held"}</span><div class="pv"><span class="lab">VALUE</span><b>${value}</b></div><div class="pa">${act}</div></div>`;
+  }).join("");
+  return `<div class="pbar"><div class="small"><b>${usd(p.usdc)}</b> USDC in ${esc(S.wallet.name)}</div>${S.status && S.status.cluster !== "mainnet" ? '<button class="btn" id="pf-faucet">Add 10,000 test USDC</button>' : ""}</div>
+    ${rows ? `<div class="plist">${rows}</div>` : '<p class="small">Nothing yet. Your first protection shows up here.</p>'}`;
+}
+const CHART_GLYPH = '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M2 14l5-6 4 4 7-8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 function hedgeView() {
   const codes = GPU_ORDER.filter((c) => hedgePair(c));
-  if (!codes.length) return windowShell("Hedge", '<div class="wbody">No hedges are open right now.</div>');
+  if (!codes.length) return '<section class="app"><p class="small">No protections are open right now.</p></section>';
   const h = S.hedge;
   if (!codes.includes(h.gpu)) h.gpu = codes[0];
-  const { put, call } = hedgePair(h.gpu);
-  const own = h.role === "own", month = monthOf(put.windowStart), g = put.gpu;
-  const price = own ? (h.collar ? put.model.ask - call.model.bid : put.model.ask) : call.model.ask;
-  const lines = own
-    ? (h.collar
-      ? [`Pay ${usd(put.model.ask)} for the floor, receive ${usd(call.model.bid)} for the $${call.strike.toFixed(2)} cap.`, `Locks ${usd(call.maxPayoff, 0)} per contract until settlement.`]
-      : [`Pays up to ${usd(put.maxPayoff, 0)} if ${month} averages $${(put.strike - put.cap).toFixed(2)} or less.`, `Model chance it pays: ${pct(put.model.probItm)}.`])
-    : [`Pays up to ${usd(call.maxPayoff, 0)} if ${month} averages $${(call.strike + call.cap).toFixed(2)} or more.`, `Model chance it pays: ${pct(call.model.probItm)}.`];
-  return windowShell(`Hedge ${month}`, `
-    <div class="two">
-      <div>
-        <div class="seg">${codes.map((c) => `<button data-hg="${c}" class="${c === h.gpu ? "on" : ""}">${esc(gpuLabel(c))}</button>`).join("")}</div>
-        <div class="row" style="margin-top:14px">
-          <label class="check radio"><input type="radio" name="role" value="own" ${own ? "checked" : ""}>I own GPUs</label>
-          <label class="check radio"><input type="radio" name="role" value="rent" ${own ? "" : "checked"}>I rent GPUs</label>
-        </div>
-        <h2 style="margin-top:18px">${own ? `Floor your ${month} ${g} revenue at $${put.strike.toFixed(2)} an hour.` : `Cap your ${month} ${g} cost at $${call.strike.toFixed(2)} an hour.`}</h2>
-        <div class="num">${usd(price)}</div>
-        <div class="small">${h.collar && own ? "net" : "per contract"}: one GPU, every hour of ${month} (${put.units} hours)</div>
-        ${lines.map((l) => `<p class="small">${esc(l)}</p>`).join("")}
-        ${own ? `<label class="check"><input type="checkbox" id="collar" ${h.collar ? "checked" : ""}>Pay for it by selling the $${call.strike.toFixed(2)} cap</label>` : ""}
-        <div class="row" style="margin-top:16px"><button class="btn default big" id="hedge-go">${own ? `Protect ${month}` : `Cap ${month}`}</button></div>
-        <p class="status" id="h-st"></p>
-      </div>
-      <div>
-        <div class="chart" style="height:260px">${hedgeChart(put, call, h.role, own && h.collar)}</div>
-        <p class="small">Line: what one contract pays against ${month}'s average price. Pattern: where the model expects that average to land.</p>
-      </div>
-    </div>`);
+  const wins = hedgeWindows(h.gpu);
+  if (!wins.includes(h.win)) h.win = wins[0];
+  const { put, call } = hedgePair(h.gpu, h.win);
+  const own = h.role === "own", month = monthOf(put.windowStart), g = put.gpu, u = put.units;
+  const collar = own && h.collar;
+  const price = own ? (collar ? put.model.ask - call.model.bid : put.model.ask) : call.model.ask;
+  const k = own ? put.strike : call.strike, far = own ? put.strike - put.cap : call.strike + call.cap, maxPay = own ? put.maxPayoff : call.maxPayoff;
+  const m = S._hm = hedgeModel(put, call, h.role, collar, price);
+  const now = lastPrint(h.gpu);
+  const delta = now ? (k - now) / now : null;
+  const rule = own
+    ? `Average below $${k.toFixed(2)}? You get the gap, down to $${far.toFixed(2)}. Above it, you keep the gain.`
+    : `Average above $${k.toFixed(2)}? You get the gap, up to $${far.toFixed(2)}. Below it, you keep the saving.`;
+  const days = (t) => Math.max(0, Math.round((t - Date.now() / 1000) / 86400));
+  const winOf = (w) => S.markets.find((x) => x.door === "hedge" && x.underlying === h.gpu && x.windowStart === w) || put;
+  return `<section class="app">
+    <header class="ahead">
+      <span class="abrand"><img src="mark.svg" alt="">Hourly</span>
+      <div class="aview" role="group" aria-label="View"><button data-more="0" class="${h.more ? "" : "on"}" aria-label="Price">$</button><button data-more="1" class="${h.more ? "on" : ""}" aria-label="Chart">${CHART_GLYPH}</button></div>
+    </header>
+    <div class="gchips">${codes.map((c) => `<button data-hg="${c}" class="${c === h.gpu ? "on" : ""}">${esc(gpuLabel(c))}</button>`).join("")}</div>
+    <div class="atitle"><b>${esc(g)} rent, per hour</b><span>Current: ${now ? usd(now) : "n/a"}</span></div>
+    <div class="flip" role="group" aria-label="Your side"><button data-role="own" class="${own ? "on" : ""}">Floor<small>I earn from GPUs</small></button><button data-role="rent" class="${own ? "" : "on"}">Cap<small>I pay to rent GPUs</small></button></div>
+    <div class="mchips">${wins.map((w) => `<button data-win="${w}" class="${w === h.win ? "on" : ""}">${monthOf(w)}<i>${days(winOf(w).tradingEnd)}d</i></button>`).join("")}</div>
+    <div class="level ${own ? "own" : "rent"}">
+      <span class="llab">${own ? "Floor" : "Cap"} <i title="${esc(rule)}">i</i></span>
+      <div class="lnum">$${k.toFixed(2)}</div>
+      <div class="ldelta">${delta === null ? "" : `${Math.abs(delta * 100).toFixed(1)}% ${delta < 0 ? "below" : "above"} today`}</div>
+      <div class="lrows"><div><span>You pay once</span><b>${usd(price)}</b></div><div><span>Get up to</span><b>${usd(maxPay, 0)}</b></div></div>
+    </div>
+    ${h.more ? `<section class="afold">
+      <div class="chips">${m.chance === null ? "" : `<span>Model chance it pays: <b>${Math.round(m.chance * 100)}%</b></span>`}${m.be === null ? "" : `<span>Break-even: <b>$${m.be.toFixed(2)}</b></span>`}</div>
+      <div class="scrub" id="scrub">${scrubHtml(m, m.today)}</div>
+      <div class="chart">${hedgeChart(m)}</div>
+      <p class="small">Move over the chart to try a price.</p></section>` : `<p class="arule">${rule}</p>`}
+    ${own ? `<label class="sw"><span>Pay less: give up gains above $${call.strike.toFixed(2)}</span><input type="checkbox" id="collar" ${collar ? "checked" : ""}><i></i></label>` : ""}
+    <div class="acta">
+      <button class="cta" id="hedge-go">${own ? "Protect" : "Cap"} ${month} for ${usd(price)}</button>
+      <p class="fine">One-time price for 1 GPU, all ${u} hours of the month. Settles in ${countdown(put.tradingEnd)}.</p>
+      <p class="status" id="h-st"></p>
+    </div>
+    <section class="wbody mine"><h3>Your protections</h3>${protectionRows()}</section>
+  </section>`;
 }
 function bindHedge() {
   $$("[data-hg]").forEach((b) => b.addEventListener("click", () => { S.hedge.gpu = b.dataset.hg; render(); }));
-  $$('input[name="role"]').forEach((r) => r.addEventListener("change", () => { S.hedge.role = r.value; render(); }));
-  const c = $("#collar"); if (c) c.addEventListener("change", () => { S.hedge.collar = c.checked; render(); });
+  $$("[data-role]").forEach((b) => b.addEventListener("click", () => { S.hedge.role = b.dataset.role; render(); }));
+  $$("[data-win]").forEach((b) => b.addEventListener("click", () => { S.hedge.win = b.dataset.win; render(); }));
+  $$("[data-more]").forEach((b) => b.addEventListener("click", () => { S.hedge.more = b.dataset.more === "1"; render(); }));
+  const cb = $("#collar"); if (cb) cb.addEventListener("change", () => { S.hedge.collar = cb.checked; render(); });
+  const svg = $("#hchart"), m = S._hm;
+  if (svg && m) {
+    const { W, H, L, R, T, B } = CHART, pw = W - L - R, ph = H - B - T, xlo = m.xlo, xhi = m.xhi;
+    const ylo = +svg.dataset.ylo, yhi = +svg.dataset.yhi, Y = (v) => T + (1 - (v - ylo) / (yhi - ylo)) * ph;
+    const g = $("#hx", svg), hit = $("#hx-hit", svg);
+    const move = (e) => {
+      const r = svg.getBoundingClientRect(), px = Math.min(Math.max(((e.clientX - r.left) / r.width) * W, L), L + pw);
+      const s = xlo + ((px - L) / pw) * (xhi - xlo);
+      g.setAttribute("opacity", 1);
+      $("#hx-l", svg).setAttribute("x1", px); $("#hx-l", svg).setAttribute("x2", px);
+      $("#hx-a", svg).setAttribute("cx", px); $("#hx-a", svg).setAttribute("cy", Y(m.none(s)));
+      $("#hx-b", svg).setAttribute("cx", px); $("#hx-b", svg).setAttribute("cy", Y(m.withIt(s)));
+      $("#scrub").innerHTML = scrubHtml(m, s);
+    };
+    hit.addEventListener("pointermove", move);
+    hit.addEventListener("pointerleave", () => { g.setAttribute("opacity", 0); $("#scrub").innerHTML = scrubHtml(m, m.today); });
+  }
+  bindPortfolio();
   const go = $("#hedge-go");
   if (go) go.addEventListener("click", () => ensureWallet(async () => {
-    const { put, call } = hedgePair(S.hedge.gpu);
+    const { put, call } = hedgePair(S.hedge.gpu, S.hedge.win);
     const own = S.hedge.role === "own";
     const legs = own ? [{ series: put.id, side: "buy", qty: 1 }, ...(S.hedge.collar ? [{ series: call.id, side: "sell", qty: 1 }] : [])] : [{ series: call.id, side: "buy", qty: 1 }];
     const st = $("#h-st");
     try {
       st.textContent = "Getting a firm price.";
-      const q = await api("quote", { owner: S.wallet.address, legs });
+      const q = await api("quote", { owner: S.wallet.address, ref: refFor(), legs });
       dialog(`<div class="icon">?</div><b>Confirm</b>
         <div class="lines" style="clear:both">
           ${q.legs.map((l) => `<div><span>${l.side === "buy" ? "Buy" : "Sell"} ${esc(l.title.split(" (")[0])}</span><span>${usd(l.price)}</span></div>`).join("")}
@@ -818,7 +930,7 @@ function bindHedge() {
         <div class="actions"><button class="btn" data-close>Cancel</button><button class="btn default" id="ok">Sign with wallet</button></div>`,
       (m, close) => $("#ok", m).addEventListener("click", async () => {
         close();
-        try { const r = await signAndSubmit(q); alertBox("✓", "Protected.", `${esc(put.gpu)} ${monthOf(put.windowStart)} is in your portfolio.`, r.url); await Promise.all([refreshMarkets(), refreshPortfolio(), refreshActivity()]); }
+        try { const r = await signAndSubmit(q); alertBox("✓", "Protected.", `${esc(put.gpu)} ${monthOf(put.windowStart)} is in your portfolio.`, r.url); await Promise.all([refreshMarkets(), refreshPortfolio(), refreshActivity()]); render(); }
         catch (e) { alertBox("!", "Not sent.", esc(e.message)); }
       }));
       st.textContent = "";
@@ -826,33 +938,61 @@ function bindHedge() {
   }));
 }
 
-// ---------- earn ----------
 const weekLabel = (a, b) => `${day(new Date(a * 1000).toISOString().slice(0, 10))} to ${day(new Date((b - 86400) * 1000).toISOString().slice(0, 10))}`;
 function earnView() {
   const open = S.vaults.filter((v) => v.phase === "deposits").sort((a, b) => a.epoch - b.epoch)[0];
   const live = S.vaults.find((v) => v.phase === "trading");
-  return windowShell("Earn", `
-    <div class="two">
-      <div>
-        ${open ? `<div class="small">Deposits close in ${countdown(open.depositEnd)}</div>
-        <h2>Underwrite ${esc(weekLabel(open.depositEnd, open.epochEnd))}.</h2>
-        <p class="small">Your USDC sells that week's GPU price questions to traders. You keep the premium and pay the winners. No market can use more than ${Math.round(open.capBps / 100)}% of the vault, and no more than half is ever at risk. Withdraw after the week settles.</p>
-        <div class="num">${usd(open.deposits, 0)}</div><div class="small">in the vault, including the venue's own ${usd(open.venueSeed, 0)}</div>
-        <div class="amount" style="font-size:28px">$<input id="dep" style="font-size:28px;width:160px" inputmode="decimal" value="1000"></div>
-        <button class="btn default big" id="dep-go">Deposit</button><p class="status" id="d-st"></p>` : "<h2>Next week's vault opens soon.</h2>"}
-      </div>
-      <div>
-        ${live ? `<div class="small">Trading now, ${esc(weekLabel(live.depositEnd, live.epochEnd))}</div>
-        <div class="stats">
-          <div class="stat"><div class="n">${usd(live.deposits, 0)}</div><div class="small">deposited</div></div>
-          <div class="stat"><div class="n">${usd(live.premiums)}</div><div class="small">premium collected</div></div>
-          <div class="stat"><div class="n">${live.openSeries}</div><div class="small">markets open</div></div>
-          <div class="stat"><div class="n">${pct(live.deposits ? live.premiums / live.deposits : 0)}</div><div class="small">premium so far, before payouts</div></div>
-        </div>` : "<p>No vault is trading yet.</p>"}
-      </div>
-    </div>`);
+  const tab = S.earnTab;
+  const seg = `<div class="seg etabs">${[["vault", "Vault"], ["quoters", "Quoters"], ["refer", "Refer"]].map(([k, l]) => `<button data-et="${k}" class="${tab === k ? "on" : ""}">${l}</button>`).join("")}</div>`;
+  let body = "";
+  if (tab === "vault") {
+    const mine = S.portfolio && S.portfolio.vaults ? S.portfolio.vaults : [];
+    const mv = open && mine.find((v) => v.epoch === open.epoch);
+    body = `
+      ${open ? `<div class="level earnlvl"><div class="llab">Underwrite next week</div><div class="lnum">${usd(open.deposits, 0)}</div><div class="ldelta">in the vault, ${usd(open.venueSeed, 0)} of it ours. Closes in ${countdown(open.depositEnd)}.</div>
+        <div class="lrows"><div><span>per market</span><b>${Math.round(open.capBps / 100)}% max</b></div><div><span>per week</span><b>50% max</b></div></div></div>
+      <div class="ecard"><h3>Deposit</h3><p class="lead">Your USDC sells that week's floors and caps. You keep the premium and pay the winners. Withdraw after the week settles.</p>
+        <div class="dep"><span>$</span><input id="dep" inputmode="decimal" value="1000"></div>
+        <button class="cta" id="dep-go">Deposit for ${esc(weekLabel(open.depositEnd, open.epochEnd))}</button><p class="status" id="d-st"></p>
+        ${mv ? `<div class="st-srow"><span>Your share</span><b>${pct(mv.share)} · ${usd(mv.cashValue)}</b></div>` : ""}</div>` : `<div class="ecard"><h3>Next week's vault</h3><p>Opens soon.</p></div>`}
+      ${live ? `<div class="ecard"><h3>Trading now</h3><p class="lead">${esc(weekLabel(live.depositEnd, live.epochEnd))}</p>
+        <div class="st-srow"><span>Deposited</span><b>${usd(live.deposits, 0)}</b></div>
+        <div class="st-srow"><span>Premium collected</span><b>${usd(live.premiums)}</b></div>
+        <div class="st-srow"><span>Markets open</span><b>${live.openSeries}</b></div>
+        <div class="st-srow"><span>Premium so far, before payouts</span><b>${pct(live.deposits ? live.premiums / live.deposits : 0)}</b></div></div>` : ""}
+      ${stakeCard()}`;
+  } else if (tab === "quoters") {
+    const qs = (S.activity && S.activity.quoters) || [];
+    const rows = qs.map((q, i) => `<div class="qrow"><i>${i + 1}</i><div><b>${esc(q.name)}</b><span>${q.fills} fill${q.fills === 1 ? "" : "s"} · ${q.wallets} wallet${q.wallets === 1 ? "" : "s"}</span></div><div class="qr"><b>${usd(q.premium)}</b><span>${pct(q.share)}</span></div></div>`).join("");
+    body = `
+      <div class="ecard"><h3>Who filled this week's RFQs</h3><p class="lead">Every trade is a 45 second RFQ. The weekly vault takes it first, the venue desk takes the rest.</p>${rows || "<p>No fills in 7 days.</p>"}</div>
+      <div class="ecard"><h3>Quoter program</h3><p class="lead">Outside makers will answer the same RFQs. Score = 1 point for answering inside 2 seconds, plus 1 point per 10 bps of price improvement on the model mid. Volume scores nothing. Each epoch's budget comes from fee income and is paid by score.</p>
+        <div class="st-srow"><span>Answer window</span><b>2 s</b></div>
+        <div class="st-srow"><span>Price improvement</span><b>1 pt per 10 bps</b></div>
+        <div class="st-srow"><span>Paid in</span><b>USDC, no token</b></div>
+        <button class="cta" disabled>Register a quoter key</button><p class="small muted">Proposed. Opens after launch.</p></div>`;
+  } else {
+    const k = S.stake && S.stake.broker;
+    const link = S.wallet ? `${location.origin}${location.pathname}?ref=${S.wallet.address}` : "";
+    const ladder = (k ? k.levels : [{ min: 10_000, share: 0.1 }, { min: 100_000, share: 0.2 }, { min: 1_000_000, share: 0.3 }, { min: 10_000_000, share: 0.4 }, { min: 100_000_000, share: 0.5 }]);
+    body = `
+      <div class="level earnlvl"><div class="llab">Broker level</div><div class="lnum">${k ? k.level : 0}</div><div class="ldelta">${k ? `${pct(k.feeShare)} of fees on premium you refer` : "Connect to see yours"}</div>
+        <div class="lrows"><div><span>referred, 28d</span><b>${usd(k ? k.referred : 0, 0)}</b></div><div><span>traders</span><b>${k ? k.traders : 0}</b></div></div>
+        ${k && k.next ? `<div class="lprog"><span style="width:${Math.round(k.progress * 100)}%"></span></div><div class="ldelta">${usd(Math.max(0, k.next.min - k.referred), 0)} more to level ${k.level + 1}, ${pct(k.next.share)}</div>` : ""}</div>
+      <div class="ecard"><h3>Your link</h3><p class="lead">Anyone who protects a rental through it counts as yours. GPU marketplaces and resellers embed it.</p>
+        ${S.wallet ? `<div class="reflink"><code>${esc(link)}</code><button class="mini" id="ref-copy">Copy</button></div>` : `<button class="cta" id="ref-connect">Connect to get a link</button>`}</div>
+      <div class="ecard"><h3>Levels</h3>${ladder.map((l, i) => `<div class="st-srow"><span>Level ${i + 1} · ${usd(l.min, 0)}+ referred in 28 days</span><b>${pct(l.share)}</b></div>`).join("")}<p class="small muted">Proposed. Referrals are recorded now; fee share pays after launch.</p></div>`;
+  }
+  return `<section class="app earn">
+    <header class="ahead"><span class="abrand"><img src="mark.svg" alt="">Hourly</span></header>
+    ${seg}${body}</section>`;
 }
 function bindEarn() {
+  $$("[data-et]").forEach((b) => b.addEventListener("click", () => { S.earnTab = b.dataset.et; render(); }));
+  const rc = $("#ref-copy");
+  if (rc) rc.addEventListener("click", async () => { try { await navigator.clipboard.writeText($(".reflink code").textContent); rc.textContent = "Copied"; } catch (_) { rc.textContent = "Select it"; } });
+  const rcn = $("#ref-connect");
+  if (rcn) rcn.addEventListener("click", () => ensureWallet(() => render()));
   const go = $("#dep-go");
   if (!go) return;
   go.addEventListener("click", () => ensureWallet(async () => {
@@ -877,59 +1017,85 @@ const initials = (n) => n.split(/[_.]/).slice(0, 2).map((x) => x[0] || "").join(
 const XGLYPH = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M18.9 2H22l-7.2 8.2L23 22h-6.6l-5.2-6.8L5.3 22H2.2l7.7-8.8L1.5 2h6.8l4.7 6.2L18.9 2z"/></svg>';
 const xShare = (text) => `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(location.origin + location.pathname)}`;
 const hueOf = (name) => { let h = 0; for (const c of name) h = (h * 31 + c.charCodeAt(0)) % 360; return h; };
+const sparkSvg = (h, w = 120, ht = 34) => {
+  if (!h || h.length < 2) return "";
+  const v = h.map((x) => x[1]), lo = Math.min(...v), hi = Math.max(...v), r = hi - lo || 1;
+  const P = v.map((y, i) => `${((i / (v.length - 1)) * (w - 6) + 3).toFixed(1)},${(ht - 4 - ((y - lo) / r) * (ht - 8)).toFixed(1)}`);
+  const last = P[P.length - 1].split(",");
+  return `<svg viewBox="0 0 ${w} ${ht}" class="spark" aria-hidden="true"><path d="M${P.join(" L")} L${w - 3},${ht} L3,${ht} Z" fill="var(--hz-black)" opacity=".08"/><path d="M${P.join(" L")}" fill="none" stroke="var(--hz-black)" stroke-width="1.6" stroke-linejoin="round"/><circle cx="${last[0]}" cy="${last[1]}" r="3.2" fill="var(--hz-signal)"/></svg>`;
+};
+function flowChart(trades) {
+  const days = 7, now = Date.now(), W = 300, H = 90, bw = W / days;
+  const sum = Array.from({ length: days }, () => ({ floor: 0, cap: 0 }));
+  trades.forEach((t) => { const k = Math.floor((now - new Date(t.at).getTime()) / 864e5); if (k >= 0 && k < days) sum[days - 1 - k][t.kind === "put" ? "floor" : "cap"] += t.cost; });
+  const mx = Math.max(1, ...sum.map((d) => d.floor + d.cap));
+  const bars = sum.map((d, i) => { const hf = (d.floor / mx) * (H - 22), hc = (d.cap / mx) * (H - 22), x = i * bw + 5; return `<rect x="${x}" y="${H - 14 - hf}" width="${bw - 10}" height="${hf}" fill="var(--hz-black)"/><rect x="${x}" y="${H - 14 - hf - hc}" width="${bw - 10}" height="${hc}" fill="var(--hz-signal)"/><text x="${x + (bw - 10) / 2}" y="${H - 2}" text-anchor="middle">${["S", "M", "T", "W", "T", "F", "S"][new Date(now - (days - 1 - i) * 864e5).getDay()]}</text>`; }).join("");
+  return `<svg viewBox="0 0 ${W} ${H}" class="flow" role="img" aria-label="Premium paid per day, last seven days">${bars}</svg>`;
+}
 function activityView() {
   const a = S.activity;
   if (!a) return windowShell("Activity", '<div class="wbody">Loading.</div>');
-  const st = a.stats[S.feedWin];
-  const hi = st.higherPct;
+  const hours = { "1h": 1, "24h": 24, "7d": 168 }[S.feedWin];
+  const all = a.trades.filter((x) => x.door === "hedge");
+  const inWin = all.filter((x) => Date.now() - new Date(x.at).getTime() <= hours * 36e5);
+  const floors = inWin.filter((x) => x.kind === "put").reduce((n, x) => n + x.cost, 0), caps = inWin.filter((x) => x.kind === "call").reduce((n, x) => n + x.cost, 0);
+  const fl = floors + caps > 0 ? floors / (floors + caps) : null;
   const test = a.cluster !== "devnet" && a.cluster !== "mainnet";
   const xh = S.status && S.status.xHandle;
-  // the crowd: which way each chip is leaning, from real fills
-  const crowd = GPU_ORDER.map((code) => {
-    const t = a.trades.filter((x) => x.underlying === code);
-    const up = t.filter((x) => x.direction === "higher").reduce((n, x) => n + x.cost, 0), dn = t.filter((x) => x.direction === "lower").reduce((n, x) => n + x.cost, 0);
-    return { code, n: t.length, p: up + dn > 0 ? up / (up + dn) : null };
-  });
+  const chips = S.index.filter((g) => GPU_ORDER.includes(g.code)).map((g) => {
+    const t = inWin.filter((x) => x.underlying === g.code), f = t.filter((x) => x.kind === "put").length;
+    const c = g.chg30;
+    return `<div class="chip"><div class="ch"><b>${esc(g.label)}</b><span>${usd(g.last)}</span></div>${sparkSvg(g.history)}
+      <div class="cs"><span class="${c >= 0 ? "up" : "dn"}">${c >= 0 ? "+" : ""}${(c * 100).toFixed(1)}% 30d</span><span>${t.length ? `${f} floor${f === 1 ? "" : "s"}, ${t.length - f} cap${t.length - f === 1 ? "" : "s"}` : "no protections"}</span></div></div>`;
+  }).join("");
   const card = (x) => {
-    const said = x.sentence.startsWith(x.name) ? x.sentence.slice(x.name.length + 1) : x.sentence;
-    const post = `${x.headline}. I'm in for ${usd(x.cost)} on Hourly, trading the price of AI compute.`;
-    return `<article class="tcard"><header><span class="av" style="--hu:${hueOf(x.name)}">${esc(initials(x.name))}</span><div><b>${esc(x.name)}</b><span>@${esc(x.name.replace(/\./g, "_"))} · ${ago(x.at)}</span></div>
+    const post = `${x.headline}. Locked in on Hourly, protecting the price of AI compute.`;
+    return `<article class="tcard"><header><span class="av" style="--hu:${hueOf(x.name)}">${esc(initials(x.name))}</span><div><b>${esc(x.name)}</b><span>${ago(x.at)}</span></div>
       <a class="xs" href="${xShare(post)}" target="_blank" rel="noopener" title="Share on X" aria-label="Share on X">${XGLYPH}</a></header>
-      <p>${esc(said)}</p>
-      <footer><span class="dir ${x.direction}">${x.direction === "higher" ? "▲ higher" : "▼ lower"}</span><span class="amt">${usd(x.cost)}</span>${x.door === "predict" && x.open ? `<button class="btn" data-copy="${esc(x.series)}" data-side="${x.direction}">Copy trade</button>` : ""}</footer></article>`;
+      <p>${esc(x.headline)}</p>
+      <footer><span class="dir ${x.kind === "put" ? "lower" : "higher"}">${x.kind === "put" ? "floor" : "cap"} · ${x.side === "sell" ? "sold" : "bought"}</span><span class="amt">${usd(x.cost)}</span></footer></article>`;
   };
-  return windowShell("The wall", `
-    <div class="crowd">${crowd.map((c) => `<div class="cw"><div class="cwh"><b>${esc(gpuLabel(c.code))}</b><span>${c.n ? (c.p >= .5 ? `${pct(c.p)} higher` : `${pct(1 - c.p)} lower`) : "quiet"}</span></div>
-      <div class="cbar ${c.p === null ? "idle" : ""}"><i style="width:${c.p === null ? 0 : Math.round(c.p * 100)}%"></i></div></div>`).join("")}</div>
+  return `<section class="app act">
+    <header class="ahead"><span class="abrand"><img src="mark.svg" alt="">Hourly</span></header>
+    <div class="chips">${chips}</div>
     <div class="feed">
-      <div class="wall">${a.trades.length ? a.trades.slice(0, 12).map(card).join("") : "<p>No calls yet. Be the first.</p>"}
+      <div class="wall">${all.length ? all.slice(0, 12).map(card).join("") : "<p>No protections yet. Be the first.</p>"}
         ${test ? '<p class="small muted">Test chain: includes our own test trades.</p>' : ""}</div>
       <aside>
         <div class="seg">${["1h", "24h", "7d"].map((w) => `<button data-fw="${w}" class="${w === S.feedWin ? "on" : ""}">${w}</button>`).join("")}</div>
-        <div class="trio"><div><b>${st.bets}</b><span>calls</span></div><div><b>${usd(st.onTable, 0)}</b><span>on the line</span></div><div><b>${st.traders}</b><span>traders</span></div></div>
-        ${hi !== null ? `<div class="meter"><span style="width:${Math.round(hi * 100)}%"></span></div><div class="small row" style="justify-content:space-between"><span>${pct(hi)} higher</span><span>${pct(1 - hi)} lower</span></div>` : ""}
-        <h3>Sharp money</h3>
-        <div class="list">${a.leaders.length ? a.leaders.slice(0, 5).map((p, i) => `<div><span><i class="rk">${i + 1}</i>${esc(p.name)}</span><span>${p.pnl >= 0 ? "+" : ""}${usd(p.pnl)}</span></div>`).join("") : "<div><span>Nobody yet.</span></div>"}</div>
-        <a class="xcta" href="${xShare("My call on AI chip rental prices, on Hourly.")}" target="_blank" rel="noopener">${XGLYPH}<span>Post your call on X</span></a>
+        <div class="trio"><div><b>${inWin.length}</b><span>protections</span></div><div><b>${usd(inWin.reduce((n, x) => n + x.cost, 0), 0)}</b><span>premium</span></div><div><b>${new Set(inWin.map((x) => x.name)).size}</b><span>wallets</span></div></div>
+        ${fl !== null ? `<div class="meter"><span style="width:${Math.round(fl * 100)}%"></span></div><div class="small row" style="justify-content:space-between"><span>${pct(fl)} floors</span><span>${pct(1 - fl)} caps</span></div>` : ""}
+        <h3>Premium per day</h3>${flowChart(all)}
+        <div class="small row" style="justify-content:space-between"><span class="lg k">floors</span><span class="lg o">caps</span></div>
+        <a class="xcta" href="${xShare("Locking in the price of AI compute, on Hourly.")}" target="_blank" rel="noopener">${XGLYPH}<span>Post it on X</span></a>
         ${xh ? `<a class="xcta ghost" href="https://x.com/${esc(xh)}" target="_blank" rel="noopener">${XGLYPH}<span>Follow @${esc(xh)}</span></a>` : ""}
       </aside>
-    </div>`);
+    </div></section>`;
+}
+// Proposed mechanism, docs/INFRA.md section 4: premium that expired unused
+// mints shares of next week's vault. Numbers come from this wallet's fills and
+// the live vault; the mint itself is not on chain.
+function stakeCard() {
+  const k = S.stake;
+  const body = !S.wallet
+    ? `<p>Connect to see it.</p>`
+    : !k ? `<p>Loading.</p>`
+    : `<div class="st-srow"><span>Premium that expired unused</span><b>${usd(k.expired)}</b></div>
+       <div class="st-srow"><span>Rate this epoch</span><b>${(k.rate * 100).toFixed(1)}¢ per $1</b></div>
+       <div class="st-srow"><span>Vault shares you would mint</span><b>${usd(k.shares)}</b></div>
+       <div class="st-srow"><span>Of ${k.epoch ? `week ${k.epoch}` : "next week"}'s vault</span><b>${k.share < 0.0005 && k.share > 0 ? "<0.1%" : pct(k.share)}</b></div>
+       ${k.open > 0 ? `<p class="small muted">${usd(k.open)} of your premium is still open. It counts when its market settles.</p>` : ""}`;
+  return `<div class="stake"><h3>Your stake</h3><p class="lead">Insurance you did not need buys you a piece of the insurer.</p>${body}<p class="small muted">Proposed. Not on chain yet.</p></div>`;
 }
 function bindActivity() {
   $$("[data-fw]").forEach((b) => b.addEventListener("click", () => { S.feedWin = b.dataset.fw; render(); }));
-  $$("[data-copy]").forEach((b) => b.addEventListener("click", () => {
-    const m = S.markets.find((x) => x.id === b.dataset.copy);
-    if (!m) return;
-    S.t = { ...S.t, gpu: m.underlying, side: b.dataset.side, strike: m.strike, seriesId: m.id, quote: null, hl: 0 };
-    S.view = "trade"; renderMenu(); goStep(4, b);
-  }));
 }
 
 // ---------- portfolio ----------
 async function faucet() {
   try { const r = await api("faucet", { owner: S.wallet.address }); alertBox("✓", "Added test USDC.", `${usd(r.amount, 0)} is in your wallet.`, r.url); }
   catch (e) { alertBox("!", "Faucet", esc(e.message)); }
-  await refreshPortfolio(); if (S.view === "portfolio") render();
+  await refreshPortfolio(); render();
 }
 function portfolioView() {
   if (!S.wallet) return windowShell("Portfolio", '<div class="wbody"><p>Connect a wallet to see your positions.</p><button class="btn default" id="pf-connect">Connect</button></div>');
@@ -971,12 +1137,267 @@ function bindPortfolio() {
   }));
 }
 
+// ---------- trading desk: chart left, ticket right, positions below ----------
+// Papertrade-style layout on Hourly's engine. One market at a time; the chart
+// shows the level and the date the ticket has picked.
+function tradeLink() {
+  const t = S.t, m = S.markets.find((x) => x.id === t.seriesId);
+  return m ? `${location.origin}${location.pathname}?t=${t.gpu}~${t.side}~${m.strike}~${m.windowEnd}~${t.amount}` : "";
+}
+function applyDeepLink() {
+  let v; try { v = new URLSearchParams(location.search).get("t"); } catch (_) { return; }
+  if (!v || S.dl || !S.markets.length) return;
+  const [gpu, side, strike, date, amt] = v.split("~");
+  S.dl = true;
+  if (!gpu || !GPU_ORDER.includes(gpu)) return;
+  const m = predict().find((x) => x.underlying === gpu && x.strike === Number(strike) && x.windowEnd === date);
+  S.t.gpu = gpu; S.t.side = side === "lower" ? "lower" : "higher"; S.t.amount = Math.min(1000, Math.max(1, Number(amt) || 10));
+  if (m) { S.t.strike = m.strike; S.t.seriesId = m.id; }
+}
+function deskInit() {
+  applyDeepLink();
+  const t = S.t;
+  if (!levelsFor(t.gpu).length) t.gpu = GPU_ORDER.find((c) => levelsFor(c).length) || t.gpu;
+  if (!t.side) t.side = "higher";
+  const ks = levelsFor(t.gpu), last = lastPrint(t.gpu) || 0;
+  if (!ks.includes(t.strike)) { t.strike = ks.length ? ks.reduce((p, k) => (Math.abs(k - last) < Math.abs(p - last) ? k : p)) : null; t.seriesId = null; }
+  const ds = t.strike !== null ? datesFor(t.gpu, t.strike) : [];
+  if (!ds.some((m) => m.id === t.seriesId)) { t.seriesId = ds[0] ? ds[0].id : null; t.quote = null; }
+}
+const deskQty = (m) => Math.max(0, Math.floor(S.t.amount / (sideUnit(m, S.t.side) * (S.t.side === "higher" ? 1.01 : 1))));
+function deskStats(g) {
+  const ms = predict().filter((m) => m.underlying === g.code);
+  const oi = ms.reduce((n, m) => n + (m.openInterest || 0), 0);
+  const tr = ((S.activity && S.activity.trades) || []).filter((x) => x.underlying === g.code && Date.now() - Date.parse(x.at) < 7 * 864e5);
+  const prem = tr.reduce((n, x) => n + x.cost, 0);
+  const q = ((S.activity && S.activity.quoters) || []).length;
+  return [["Last print", g.lastDate ? day(g.lastDate) : ""], ["Open interest", oi.toLocaleString("en-US")], ["7d premium", usd(prem, 0)], ["Markets", String(ms.length)], ["Quoters", String(q)]];
+}
+function ticketHtml() {
+  const t = S.t, g = gpuLabel(t.gpu), up = t.side === "higher";
+  const ks = levelsFor(t.gpu), ds = t.strike !== null ? datesFor(t.gpu, t.strike) : [];
+  const m = S.markets.find((x) => x.id === t.seriesId) || null;
+  const p = S.wallet ? S.portfolio : null;
+  const openN = p ? p.rows.filter((r) => r.status === "open" && (r.long || r.short)).length : 0;
+  const locked = p ? p.rows.reduce((n, r) => n + (r.lockedCollateral || 0), 0) : 0;
+  const eq = `<div class="teq"><span>Balance <b>${p ? usd(p.usdc, 0) : "--"}</b></span><span>${p ? openN : "--"} open</span></div>`;
+  const toggle = `<div class="tside" role="group" aria-label="Side"><button data-side="higher" class="up ${up ? "on" : ""}">▲ Higher</button><button data-side="lower" class="dn ${up ? "" : "on"}">▼ Lower</button></div>`;
+  const row = (k, lab, mm, sel, attr) => { const ch = mm ? sideChance(mm, t.side) : 0; return `<button class="trow ${sel ? "on" : ""}" ${attr}="${k}" style="--ch:${Math.round(ch * 100)}%" title="${pct(ch)} chance"><span>${lab}</span><small>${mm ? cents(sideUnit(mm, t.side)) : ""}</small></button>`; };
+  const strikes = `<div class="tlab">${up ? "Rents above" : "Rents at or below"}<i>bar = chance</i></div><div class="trows">${ks.map((k) => row(k, `$${k.toFixed(2)}`, seriesNear(t.gpu, k), k === t.strike, "data-k")).join("")}</div>`;
+  const dates = `<div class="tlab">On</div><div class="tdays">${ds.map((x) => `<button class="${x.id === t.seriesId ? "on" : ""}" data-d="${x.id}">${day(x.windowEnd).replace(/ (Oct|Nov|Dec|Sep|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug)/, "")}</button>`).join("")}</div>`;
+  if (!m) return `<aside class="ticket ${up ? "tup" : "tdn"}" id="ticket">${eq}${toggle}${strikes}${dates}<p class="tfine">No open market here. Pick another price.</p></aside>`;
+  const unit = sideUnit(m, t.side), qty = deskQty(m), verb = up ? "above" : "at or below", q = t.quote;
+  let bottom;
+  if (q) {
+    const put = up ? q.pay + q.fee : q.lock - q.receive;
+    const left = Math.max(0, 40 - Math.round((Date.now() - t.quotedAt) / 1000));
+    bottom = `<div class="tq ${up ? "up" : "dn"}">
+      <p>You put in <b>${usd(put)}</b>. If ${esc(g)} rents ${verb} $${m.strike.toFixed(2)} on ${day(m.windowEnd)}, you get <b>${usd(q.legs[0].qty)}</b>. If not, nothing.</p>
+      <div class="tlines"><div><span>Contracts</span><b>${q.legs[0].qty}</b></div><div><span>Price</span><b>${cents(up ? q.legs[0].price : 1 - q.legs[0].price)} per $1</b></div>${q.fee ? `<div><span>Fee</span><b>${usd(q.fee)}</b></div>` : ""}<div><span>Filled by</span><b>${q.legs[0].via === "vault" ? "weekly vault" : "venue desk"}</b></div><div><span>Firm for</span><b id="qtm">${left}s</b></div></div>
+      <button class="tcta ${up ? "up" : "dn"}" id="t-sign">Sign with wallet</button><button class="tback" id="t-back">Change</button></div>`;
+  } else {
+    bottom = `<div class="tlab">Amount</div>
+      <div class="tamt"><span>$</span><input id="amt" inputmode="decimal" value="${t.amount}" aria-label="Amount in USDC"><div class="tchips">${[5, 20, 50, 100].map((v) => `<button data-amt="${v}" class="${t.amount === v ? "on" : ""}">$${v}</button>`).join("")}</div></div>
+      <div class="thero"><div><i>You pay at most</i><b id="loss">${usd(t.amount)}</b></div><div class="w"><i>You get if right</i><b id="win" data-v="${qty}">${usd(qty)}</b></div></div>
+      <p class="tsub">${pct(sideChance(m, t.side))} chance · ${cents(unit)} per $1 · <span id="qty">${qty}</span> contracts</p>
+      <button class="tcta ${S.wallet ? (up ? "up" : "dn") : "gold"}" id="t-go" ${qty > 0 || !S.wallet ? "" : "disabled"}>${S.wallet ? (t.quoting ? "Getting a firm price" : "Get a firm price") : "Connect wallet"}</button>
+      <p class="status tst" id="t-st">${t.qerr ? esc(t.qerr) : ""}</p>
+      <div class="tshare"><button id="t-copy">Copy link to this trade</button><a target="_blank" rel="noopener" href="${xShare(`${g} ${verb} $${m.strike.toFixed(2)} on ${day(m.windowEnd)}: ${pct(sideChance(m, t.side))} chance, ${cents(unit)} per $1.`).replace(encodeURIComponent(location.origin + location.pathname), encodeURIComponent(tradeLink()))}">Post it</a></div>`;
+  }
+  return `<aside class="ticket ${up ? "tup" : "tdn"}" id="ticket">${eq}${toggle}${strikes}${dates}${bottom}</aside>`;
+}
+function tapeMarquee() {
+  const tr = ((S.activity && S.activity.trades) || []).slice(0, 14);
+  if (!tr.length) return "";
+  const chip = (x) => { const u = x.direction === "higher" || x.kind === "call"; return `<span class="tkc ${u ? "up" : "dn"}">${u ? "▲" : "▼"} ${esc(x.gpu || x.underlying)} ${usd(x.cost, 0)}</span>`; };
+  const row = tr.map(chip).join("");
+  return `<div class="tape" aria-label="Recent trades"><div class="mqtrack">${row}${row}</div></div>`;
+}
+function deskPositions() {
+  const tab = S.deskTab || "positions";
+  const test = S.status && S.status.cluster !== "mainnet";
+  const tabs = `<div class="ttabs">${[["positions", "Positions"], ["tape", "Tape"]].map(([k, l]) => `<button data-tt="${k}" class="${tab === k ? "on" : ""}">${l}</button>`).join("")}<span class="spacer"></span>${S.wallet && test ? '<button class="mini" id="pf-faucet">Add test USDC</button>' : ""}</div>`;
+  let body;
+  if (tab === "tape") {
+    const tr = (S.activity && S.activity.trades) || [];
+    body = tr.length ? `<table class="ptab"><tr><th>When</th><th>Who</th><th>Trade</th><th class="r">Premium</th><th class="r">Result</th></tr>${tr.slice(0, 30).map((x) => `<tr><td>${ago(x.at)}</td><td>${esc(x.name)}</td><td>${esc(x.headline)}</td><td class="r">${usd(x.cost)}</td><td class="r">${x.settled ? (x.pnl >= 0 ? `<span class="up">+${usd(x.pnl)}</span>` : `<span class="dn">${usd(x.pnl)}</span>`) : "open"}</td></tr>`).join("")}</table>` : '<p class="tempty">No trades yet.</p>';
+  } else if (!S.wallet) {
+    body = '<p class="tempty">Connect wallet to view your positions. <button class="mini" id="pf-connect">Connect</button></p>';
+  } else if (!S.portfolio) {
+    body = '<p class="tempty">Loading.</p>';
+  } else {
+    const p = S.portfolio;
+    const rows = p.rows.map((r) => {
+      const pred = r.door === "predict";
+      const title = pred ? `${r.gpu} ${r.short > r.long ? "at or below" : "above"} $${r.strike.toFixed(2)}` : `${r.gpu} ${monthOf(r.windowStart)} ${r.kind === "put" ? "floor" : "cap"} at $${r.strike.toFixed(2)}`;
+      const when = pred ? day(r.windowEnd) : monthOf(r.windowStart), dirUp = pred ? r.long >= r.short : r.kind === "call";
+      let value, act = "";
+      if (r.status === "settled") {
+        value = `settled $${r.settled.price.toFixed(4)}`;
+        if (r.long > 0) act += `<button class="mini" data-act="redeem" data-s="${r.id}">Redeem ${usd(r.redeemable)}</button> `;
+        if (r.short > 0) act += `<button class="mini" data-act="reclaim" data-s="${r.id}">Reclaim ${usd(r.reclaimable)}</button>`;
+      } else {
+        value = usd((r.markPerContract ?? 0) * (r.long - r.short));
+        const both = Math.min(r.long, r.short);
+        if (both > 0) act = `<button class="mini" data-act="close" data-s="${r.id}" data-q="${both}">Close ${both}</button>`;
+      }
+      return `<tr><td><b>${esc(title)}</b><div class="muted">${when} · ${r.status === "open" ? `closes in ${countdown(r.tradingEnd)}` : esc(r.status)}</div></td><td><span class="${dirUp ? "up" : "dn"}">${dirUp ? "▲" : "▼"} ${r.long ? `long ${r.long}` : ""} ${r.short ? `short ${r.short}` : ""}</span></td><td class="r">${value}${r.short ? `<div class="muted">${usd(r.lockedCollateral, 0)} locked</div>` : ""}</td><td class="r">${act}</td></tr>`;
+    }).join("");
+    const vrows = (p.vaults || []).map((v) => `<tr><td><b>Vault, ${esc(weekLabel(v.depositEnd, v.epochEnd))}</b><div class="muted">${esc(v.phase)}</div></td><td>${pct(v.share)} of it</td><td class="r">${usd(v.cashValue)}</td><td class="r">${v.phase === "withdrawable" ? `<button class="mini" data-vw="${v.epoch}">Withdraw</button>` : ""}</td></tr>`).join("");
+    body = rows || vrows ? `<table class="ptab"><tr><th>Market</th><th>Side</th><th class="r">Value</th><th></th></tr>${rows}${vrows}</table>` : '<p class="tempty">Nothing yet. Your first trade shows up here.</p>';
+  }
+  return `<section class="tpos">${tabs}${body}</section>`;
+}
+function deskView() {
+  deskInit();
+  const t = S.t, g = S.index.find((x) => x.code === t.gpu);
+  if (!g) return '<section class="tdesk"><p class="tempty">Loading the index.</p></section>';
+  CHS.W = 980; CHS.H = 430;
+  const pills = GPU_ORDER.map((c) => S.index.find((x) => x.code === c)).filter(Boolean).map((x) => `<button class="apill ${x.code === t.gpu ? "on" : ""}" data-gpu="${x.code}"><b>${esc(x.label)}</b><span>${usd(x.last)}</span><em class="${x.chg7 >= 0 ? "up" : "dn"}">${x.chg7 >= 0 ? "+" : ""}${(x.chg7 * 100).toFixed(2)}%</em></button>`).join("");
+  const stats = deskStats(g).slice(0, 3).map(([k, v]) => `<span class="spill"><i>${k}</i><b>${v}</b></span>`).join("");
+  const rng = [30, 60, 90].map((n) => `<button data-rng="${n}" class="${(t.range || 30) === n ? "on" : ""}">${n}d</button>`).join("");
+  return `<section class="tdesk">
+    <div class="tmain">
+      <div class="tbar"><div class="apills">${pills}</div><div class="spills">${stats}</div></div>
+      <div class="tchart"><div class="thead"><span class="tname">${esc(g.label)}<small>rent per hour, Ornn daily print</small></span><span class="tpx">${usd(g.last)}</span><div class="seg trng">${rng}</div></div><div class="chart" id="chart">${chartSvg()}</div><p class="tread">${esc(readLine(t.gpu))}</p></div>
+      ${deskPositions()}
+    </div>
+    ${ticketHtml()}
+  </section>`;
+}
+function renderTicket() { const el = $("#ticket"); if (el) { el.outerHTML = ticketHtml(); bindTicket(); } }
+function bindTicket() {
+  const reset = () => { S.t.quote = null; S.t.qerr = null; };
+  $$("[data-side]").forEach((b) => b.addEventListener("click", () => { S.t.side = b.dataset.side; reset(); render(); }));
+  $$("[data-k]").forEach((b) => b.addEventListener("click", () => { S.t.strike = Number(b.dataset.k); S.t.seriesId = null; reset(); render(); }));
+  $$("[data-d]").forEach((b) => b.addEventListener("click", () => { S.t.seriesId = b.dataset.d; reset(); render(); }));
+  const input = $("#amt");
+  if (input) {
+    const update = () => {
+      S.t.amount = Math.max(0, Number(input.value) || 0);
+      const m = S.markets.find((x) => x.id === S.t.seriesId); if (!m) return;
+      const qty = deskQty(m);
+      tween($("#win"), qty, usd); $("#qty").textContent = qty; $("#loss").textContent = usd(S.t.amount);
+      const go = $("#t-go"); if (go && S.wallet) go.disabled = qty <= 0;
+      $$("[data-amt]").forEach((b) => b.classList.toggle("on", Number(b.dataset.amt) === S.t.amount));
+    };
+    input.addEventListener("input", update);
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); const go = $("#t-go"); if (go && !go.disabled) go.click(); } });
+    $$("[data-amt]").forEach((b) => b.addEventListener("click", () => { input.value = b.dataset.amt; update(); }));
+  }
+  const go = $("#t-go"); if (go) go.addEventListener("click", () => ensureWallet(deskQuote));
+  const cp = $("#t-copy"); if (cp) cp.addEventListener("click", () => { try { navigator.clipboard.writeText(tradeLink()); } catch (_) { /* no clipboard */ } cp.textContent = "Copied"; });
+  const sign = $("#t-sign"); if (sign) sign.addEventListener("click", deskSign);
+  const back = $("#t-back"); if (back) back.addEventListener("click", () => { S.t.quote = null; renderTicket(); });
+}
+async function deskQuote() {
+  const t = S.t, m = S.markets.find((x) => x.id === t.seriesId);
+  if (!m || !S.wallet) return;
+  const qty = deskQty(m); if (qty <= 0) return;
+  t.quoting = true; t.qerr = null; renderTicket();
+  try {
+    t.quote = await api("quote", { owner: S.wallet.address, ref: refFor(), legs: [{ series: m.id, side: t.side === "higher" ? "buy" : "sell", qty }] });
+    t.quotedAt = Date.now();
+  } catch (e) { t.quote = null; t.qerr = e.message; }
+  t.quoting = false; renderTicket();
+  if (t.qerr && /faucet/i.test(t.qerr)) {
+    const st = $("#t-st");
+    if (st) { st.innerHTML = `${esc(t.qerr)} <button class="mini" id="fz">Add test USDC</button>`; $("#fz").addEventListener("click", async () => { await faucet(); deskQuote(); }); }
+  }
+}
+async function deskSign() {
+  const t = S.t;
+  if (!t.quote) return;
+  if (Date.now() - t.quotedAt > 40_000) { t.quote = null; return deskQuote(); }
+  const b = $("#t-sign"); b.disabled = true; b.textContent = S.wallet.kind === "burner" ? "Signing" : "Approve in your wallet";
+  try {
+    const r = await signAndSubmit(t.quote);
+    const m = S.markets.find((x) => x.id === t.seriesId);
+    alertBox("✓", "Placed.", `${esc(gpuLabel(t.gpu))} ${t.side === "higher" ? "above" : "at or below"} $${m.strike.toFixed(2)} on ${day(m.windowEnd)}. It's in your positions.`, r.url);
+    t.quote = null;
+    await Promise.all([refreshMarkets(), refreshPortfolio(), refreshActivity()]);
+    render();
+  } catch (e) { t.qerr = e.message || "The wallet declined."; t.quote = null; renderTicket(); }
+}
+setInterval(() => {
+  if (S.view !== "desk" || !S.t.quote) return;
+  const left = 40 - Math.round((Date.now() - S.t.quotedAt) / 1000);
+  if (left <= 0) { S.t.quote = null; S.t.qerr = "That price expired. Get a fresh one."; renderTicket(); return; }
+  const el = $("#qtm"); if (el) el.textContent = `${left}s`;
+}, 1000);
+function bindDesk() {
+  bindChart();
+  $$("[data-gpu]").forEach((b) => b.addEventListener("click", () => { S.t.gpu = b.dataset.gpu; S.t.strike = null; S.t.seriesId = null; S.t.quote = null; S.t.qerr = null; render(); }));
+  $$("[data-rng]").forEach((b) => b.addEventListener("click", () => { S.t.range = Number(b.dataset.rng); $$("[data-rng]").forEach((x) => x.classList.toggle("on", x === b)); refreshChart(); }));
+  $$("[data-tt]").forEach((b) => b.addEventListener("click", () => { S.deskTab = b.dataset.tt; render(); }));
+  bindTicket(); bindPortfolio();
+}
+
+// ---------- strategies ----------
+const stratKey = "hourly.strats";
+const stratLoad = () => { try { return JSON.parse(store.get(stratKey) || "[]").map(ST.decode).filter(Boolean); } catch (_) { return []; } };
+const stratSave = (a) => store.set(stratKey, JSON.stringify(a.map(ST.encode)));
+function stratInit() {
+  if (S.st) return;
+  S.st = { cur: { ...ST.PRESETS[0].rule, id: ST.PRESETS[0].id, gpu: "H100_SXM" }, saved: stratLoad() };
+  const shared = ST.decode(new URLSearchParams(location.search).get("s"));
+  if (shared) { S.st.cur = shared; S.view = "strat"; }
+}
+const stratHist = (c) => ((S.index.find((x) => x.code === c) || {}).history) || [];
+function verdictHtml(b) {
+  const f = (x) => (x.hit === null ? "no trades" : `${pct(x.hit)} right, ${x.n} trade${x.n === 1 ? "" : "s"}`);
+  const v = { held: ["held", "Held on the sealed last 32 days"], failed: ["failed", "Did not hold on the sealed last 32 days"], thin: ["thin", "Too few trades to judge"] }[b.verdict];
+  return `<div class="st-sverd ${v[0]}"><b>${v[1]}</b><span>${b.days} daily prints only. Index moves, no premium or fees. Not a forecast.</span></div>
+    <div class="st-sgrid"><div><i>First 60 days</i><b>${f(b.train)}</b></div><div><i>Sealed last 32</i><b>${f(b.test)}</b></div><div><i>All days</i><b>${f(b.all)}</b></div><div><i>Always bet this side</i><b>${b.base === null ? "n/a" : pct(b.base) + " right"}</b></div></div>`;
+}
+function stratCard(r, i) {
+  const lab = gpuLabel(r.gpu), b = ST.backtest(stratHist(r.gpu), r), now = ST.firesNow(stratHist(r.gpu), r);
+  return `<div class="st-scard ${now ? "fire" : ""}"><p>${esc(ST.ruleText(r, lab))}</p>
+    <div class="st-srow"><span class="st-sflag ${b.verdict}">${b.verdict === "held" ? "Held" : b.verdict === "failed" ? "Failed" : "Thin"}</span><span>${now ? "Fires today" : "Not firing today"}</span>
+    ${now ? `<button class="mini" data-prep="${i}">Prepare trade</button>` : ""}<button class="mini ghost" data-del="${i}">Remove</button></div></div>`;
+}
+function stratView() {
+  stratInit();
+  const c = S.st.cur, lab = gpuLabel(c.gpu), hist = stratHist(c.gpu);
+  if (!hist.length) return '<section class="strat"><p class="tempty">Loading the index.</p></section>';
+  const b = ST.backtest(hist, c), now = ST.firesNow(hist, c);
+  const sel = (k, opts) => `<select data-sf="${k}">${opts.map(([v, l]) => `<option value="${v}" ${String(c[k]) === String(v) ? "selected" : ""}>${l}</option>`).join("")}</select>`;
+  const share = `${location.origin}${location.pathname}?s=${ST.encode(c)}`;
+  return `<section class="strat">
+    <div class="st-shead"><h2>Strategies</h2><p>Pick a rule. It is tested on the last ${hist.length} daily prints with the final 32 days sealed. When it fires, it prepares the trade and you approve it. Nothing trades on its own.</p></div>
+    <div class="st-spre">${ST.PRESETS.map((p) => `<button data-pre="${p.id}" class="${c.id === p.id ? "on" : ""}"><b>${p.name}</b><span>${esc(p.text({ ...p.rule, label: "the price" }))}</span></button>`).join("")}</div>
+    <div class="st-sedit"><span>When</span>${sel("gpu", GPU_ORDER.map((g) => [g, gpuLabel(g)]))}<span>${c.trig === "drop" ? "falls" : "rises"}</span>${sel("pct", [2, 3, 5, 8, 10, 15].map((x) => [x, x + "%"]))}<span>in</span>${sel("lb", [3, 7, 14, 21].map((x) => [x, x + " days"]))}<span>then bet ${c.side === "higher" ? "Higher" : "Lower"} for</span>${sel("hold", [3, 7, 10, 14].map((x) => [x, x + " days"]))}</div>
+    <p class="st-sread">${esc(ST.ruleText(c, lab))}</p>
+    ${verdictHtml(b)}
+    <div class="st-sact"><span class="${now ? "fireon" : ""}">${now ? "This rule fires today." : "This rule is not firing today."}</span>
+      ${now ? '<button class="btn default" id="s-prep">Prepare trade</button>' : ""}<button class="btn" id="s-save">Watch this rule</button><button class="btn" id="s-copy">Copy link</button><a class="btn" target="_blank" rel="noopener" href="${xShare(`${ST.ruleText(c, lab)}. Tested on ${b.days} Ornn prints: ${b.verdict === "held" ? "held" : b.verdict === "failed" ? "failed" : "too few trades to judge"} on the sealed last 32 days.`).replace(encodeURIComponent(location.origin + location.pathname), encodeURIComponent(share))}">Post it</a></div>
+    ${S.st.saved.length ? `<h3>Watching</h3><div class="st-slist">${S.st.saved.map(stratCard).join("")}</div>` : ""}
+  </section>`;
+}
+function stratPrep(r) {
+  const t = S.t, ks = levelsFor(r.gpu);
+  t.gpu = r.gpu; t.side = r.side; t.strike = null; t.seriesId = null; t.quote = null; t.qerr = null;
+  S.view = "desk"; renderMenu(); render();
+  alertBox("→", "Trade ready to review.", `${esc(ST.ruleText(r, gpuLabel(r.gpu)))}. Pick the level and size, then get a firm price. You approve it.`);
+  void ks;
+}
+function bindStrat() {
+  const c = S.st.cur;
+  $$("[data-pre]").forEach((b) => b.addEventListener("click", () => { const p = ST.PRESETS.find((x) => x.id === b.dataset.pre); S.st.cur = { ...p.rule, id: p.id, gpu: c.gpu }; render(); }));
+  $$("[data-sf]").forEach((e) => e.addEventListener("change", () => { const k = e.dataset.sf; c[k] = k === "gpu" ? e.value : Number(e.value); render(); }));
+  const prep = $("#s-prep"); if (prep) prep.addEventListener("click", () => stratPrep(c));
+  $("#s-save").addEventListener("click", () => { if (!S.st.saved.some((x) => ST.encode(x) === ST.encode(c))) S.st.saved.push({ ...c }); stratSave(S.st.saved); render(); });
+  $("#s-copy").addEventListener("click", () => { const u = `${location.origin}${location.pathname}?s=${ST.encode(c)}`; try { navigator.clipboard.writeText(u); } catch (_) { /* no clipboard */ } $("#s-copy").textContent = "Copied"; });
+  $$("[data-prep]").forEach((b) => b.addEventListener("click", () => stratPrep(S.st.saved[Number(b.dataset.prep)])));
+  $$("[data-del]").forEach((b) => b.addEventListener("click", () => { S.st.saved.splice(Number(b.dataset.del), 1); stratSave(S.st.saved); render(); }));
+}
+
 // ---------- about ----------
 function aboutBox() {
   const st = S.status || {};
   const bt = st.backtest && st.backtest.result ? st.backtest.result.find((r) => r.horizonDays === 7) : null;
   dialog(`<div class="icon"><img class="logo" src="mark.svg" alt=""></div><b>Hourly</b>
-    <p>Options on the price of renting an AI chip. Every contract is fully backed in USDC and settled by a Switchboard oracle that averages Ornn's daily print. The Solana program checks the oracle's signatures before it pays anyone.</p>
+    <p>A brokerage desk for AI compute price risk: firm quotes on GPU-hour floors, caps and collars. Every contract is fully backed in USDC and settled by a Switchboard oracle that averages Ornn's daily print. The Solana program checks the oracle's signatures before it pays anyone.</p>
     ${bt ? `<p class="small">Model check, out of sample: ${pct(bt.coverage)} of prints landed inside its 80% range 7 days out. Brier ${bt.brier.toFixed(3)} against ${bt.brierCoin.toFixed(3)} for a coin.</p>` : ""}
     <p class="small mono">program ${esc(st.programId || "")}<br>network ${esc(st.cluster || "")}</p>
     <p class="small">${st.cluster === "mainnet" ? "Not investment advice." : "Test money only. Not investment advice."}</p>
@@ -990,9 +1411,8 @@ function heroHtml() {
     .filter(([c]) => S.index.find((x) => x.code === c))
     .map(([c, d]) => `<button class="sug" data-sug="${c}" data-dir="${d}">${esc(gpuLabel(c))}<em>${d === "higher" ? "↑ higher" : "↓ lower"}</em></button>`).join("");
   return `<header class="hero">
-    ${mascot("big")}
-    <h1>Bet on the price of <span class="serif">AI chips.</span></h1>
-    <p class="sub">Will renting an H100 cost more or less tomorrow? Pick a side. Get paid if you're right.</p>
+    <h1>Markets in the price of <span class="serif">AI chips.</span></h1>
+    <p class="sub">Take a view on a daily rental print. Fully backed, settled by oracle. To hedge a month of GPU-hours, use Protect.</p>
   </header>${gs.length ? assetsHtml() : ""}`;
 }
 let tyTok = 0;
@@ -1041,7 +1461,7 @@ function liveHtml() {
     const hi = l.p === null ? null : l.p >= 0.5;
     return `<button class="crow2 ${S.t.gpu === c ? "on" : ""}" data-pick="${c}"><span class="rank">${i + 1}</span><span class="cav">${char(c)}</span>
       <span class="ct"><b>${esc(g.label)}</b><em>${l.n ? `${l.n} call${l.n > 1 ? "s" : ""}` : "quiet"}</em></span>
-      <span class="cl ${hi === null ? "" : hi ? "up" : "dn"}">${l.p === null ? "–" : `${pct(hi ? l.p : 1 - l.p)}`}<small>${l.p === null ? "" : hi ? "higher" : "lower"}</small></span></button>`;
+      <span class="cl ${hi === null ? "" : hi ? "up" : "dn"}">${l.p === null ? "n/a" : `${pct(hi ? l.p : 1 - l.p)}`}<small>${l.p === null ? "" : hi ? "higher" : "lower"}</small></span></button>`;
   }).join("");
   const lc = last ? `<div class="lastcall"><span class="lk">Latest call</span><p>${esc(last.sentence)}</p><div class="lr"><span class="dir ${last.direction}">${last.direction === "higher" ? "▲ Higher" : "▼ Lower"}</span>${last.door === "predict" && last.open ? `<button class="mini" data-copy="${esc(last.series)}" data-side="${last.direction}">Copy trade</button>` : ""}<a class="mini ghost" href="${xShare(`${last.headline}. Trading AI chip prices on Hourly.`)}" target="_blank" rel="noopener">${XGLYPH}</a></div></div>` : "";
   return `<aside class="live"><div class="lh"><h3>What the crowd thinks</h3><button class="lall" data-view-go="activity">All calls</button></div>
@@ -1053,40 +1473,262 @@ function thesisView() {
     fetch("thesis.json").then((r) => r.json()).then((j) => { THESIS = j; if (S.view === "thesis") render(); }).catch(() => { THESIS = { title: "Thesis", toc: [], html: "<p>The thesis is not published yet.</p>" }; if (S.view === "thesis") render(); });
     return '<div class="thesis"><p class="muted">Loading.</p></div>';
   }
-  return `<div class="thesis"><nav class="toc"><b>Thesis</b>${THESIS.toc.map(([id, t]) => `<a href="#${id}" data-toc="${id}">${esc(t)}</a>`).join("")}</nav>
-    <article class="doc"><h1>${esc(THESIS.title)}</h1>${THESIS.html}</article></div>`;
+  return `<div class="thesis"><nav class="toc"><b>Contents</b>${THESIS.toc.map(([id, t], i) => `<a href="#${id}" data-toc="${id}"><i>${String(i + 1).padStart(2, "0")}</i>${esc(t)}</a>`).join("")}</nav>
+    <article class="doc"><div class="dkick"><span>Research note</span><span>Hourly · Ornn OCPI · Solana</span></div><h1>${esc(THESIS.title)}</h1><div class="dmeta"><span>Status<b>Draft, test money</b></span><span>Sections<b>${THESIS.toc.length}</b></span><span>Data<b>Ornn OCPI daily</b></span></div>${THESIS.html}</article></div>`;
 }
 function bindThesis() {
   $$("[data-toc]").forEach((a) => a.addEventListener("click", (e) => { e.preventDefault(); const t = document.getElementById(a.dataset.toc); if (t) t.scrollIntoView({ behavior: "smooth", block: "start" }); }));
 }
-function render() {
-  const sub = () => `<div class="subtabs"><button data-sub="hedge" class="${S.view === "hedge" ? "on" : ""}">Protect</button><button data-sub="earn" class="${S.view === "earn" ? "on" : ""}">Earn</button></div>`;
-  const views = { trade: tradeView, chain: chainView, hedge: () => sub() + hedgeView(), earn: () => sub() + earnView(), activity: activityView, portfolio: portfolioView, thesis: thesisView, home: homeView };
-  $("#desk").innerHTML = S.view === "trade" ? `<div class="shell"><div class="main">${heroHtml()}${views.trade()}</div>${liveHtml()}</div>` : views[S.view]();
-  document.body.classList.toggle("fit", S.view === "trade");
-  document.body.classList.toggle("onhome", S.view === "home");
-  $$("[data-home]").forEach((b) => b.addEventListener("click", () => { S.view = "trade"; renderMenu(); render(); }));
-  ({ trade: bindTrade, chain: bindChain, hedge: bindHedge, earn: bindEarn, activity: bindActivity, portfolio: bindPortfolio, thesis: bindThesis, home: () => bindHome((v) => { S.view = v; renderMenu(); render(); scrollTo(0, 0); }) })[S.view]();
-  slidePill($(".steps"), "steps");
-  $$("[data-view-go]").forEach((b) => b.addEventListener("click", () => { S.view = b.dataset.viewGo; renderMenu(); render(); }));
-  if (S.view === "trade") { bindActivity(); $$("[data-pick]").forEach((b) => b.addEventListener("click", () => startFrom(b.dataset.pick, null))); }
-  $$("[data-sub]").forEach((b) => b.addEventListener("click", () => { S.view = b.dataset.sub; renderMenu(); render(); }));
-  $$("[data-sug]").forEach((b) => b.addEventListener("click", () => startFrom(b.dataset.sug, b.dataset.dir)));
-  const go = $("#go"); if (go) go.addEventListener("click", () => startFrom(S.t.gpu, null));
-  $$("[data-asset]").forEach((b) => b.addEventListener("click", () => {
-    S.t = { ...S.t, gpu: b.dataset.asset, step: 1, side: null, strike: null, seriesId: null, quote: null, hl: 0, dir: "back" };
-    render(); const w = $(".window"); if (w) w.scrollIntoView({ behavior: "smooth", block: "start" });
+// ---------- house ----------
+// The House is whoever takes the other side of every ticket. All numbers are
+// computed here from the live activity feed and markets; nothing is invented.
+// Trades are test flow on the current cluster.
+function houseBook() {
+  const tr = (S.activity && S.activity.trades) || [];
+  const dg = tr.filter((x) => x.kind === "digital" && x.side === "buy");
+  const open = dg.filter((x) => x.open), done = dg.filter((x) => x.settled).sort((a, b) => new Date(a.at) - new Date(b.at));
+  const chips = {};
+  const win = (x, P) => ((x.direction === "higher" ? P > x.strike : P <= x.strike) ? 1 : 0);
+  open.forEach((x) => {
+    const g = S.index.find((i) => i.code === x.underlying); if (!g) return;
+    const m = S.markets.find((k) => k.id === x.series);
+    const pHigher = m && m.model ? m.model.probItm : null;
+    const pWin = pHigher == null ? null : (x.direction === "higher" ? pHigher : 1 - pHigher);
+    const c = chips[x.gpu] || (chips[x.gpu] = { gpu: x.gpu, last: g.last, qty: 0, hi: 0, lo: 0, prem: 0, exp: 0, expOk: true, list: [] });
+    c.qty += x.qty; c[x.direction === "higher" ? "hi" : "lo"] += x.qty; c.prem += x.cost;
+    if (pWin == null) c.expOk = false; else c.exp += x.qty * pWin;
+    c.list.push(x);
+  });
+  const rows = Object.values(chips).sort((a, b) => b.qty - a.qty);
+  const tot = rows.reduce((a, c) => ({ qty: a.qty + c.qty, prem: a.prem + c.prem, exp: a.exp + c.exp, ok: a.ok && c.expOk }), { qty: 0, prem: 0, exp: 0, ok: true });
+  const shocks = [-0.2, -0.15, -0.1, -0.05, 0, 0.05, 0.1, 0.15, 0.2].map((sh) => {
+    let pnl = 0;
+    rows.forEach((c) => c.list.forEach((x) => { pnl += x.cost - x.qty * win(x, c.last * (1 + sh)); }));
+    return { sh, pnl };
+  });
+  const SH = [-0.2, -0.15, -0.1, -0.05, 0, 0.05, 0.1, 0.15, 0.2];
+  rows.forEach((c) => { c.sh = SH.map((sh) => c.list.reduce((a, x) => a + x.cost - x.qty * win(x, c.last * (1 + sh)), 0)); });
+  const ladder = {};
+  open.forEach((x) => { const d = x.windowEnd; const e = ladder[d] || (ladder[d] = { d, qty: 0, prem: 0 }); e.qty += x.qty; e.prem += x.cost; });
+  const exp = Object.values(ladder).sort((a, b) => a.d.localeCompare(b.d));
+  let run = 0;
+  const curve = done.map((x) => { run += -x.pnl; return { at: x.at, v: run }; });
+  const buyersWon = done.filter((x) => x.pnl > 0).length;
+  const nowS = Date.now() / 1000;
+  const exps = open.map((x) => { const m = S.markets.find((k) => k.id === x.series); return m && m.expiry > nowS ? m.expiry : null; }).filter(Boolean);
+  return { rows, tot, shocks, SH, exp, curve, done, buyersWon, openN: open.length, nextExp: exps.length ? Math.min(...exps) : null, win };
+}
+const sgn = (n) => (n >= 0 ? "+" : "-") + usd(Math.abs(n));
+function shockSvg(sh) {
+  const W = 560, H = 190, pad = 26, mx = Math.max(1, ...sh.map((d) => Math.abs(d.pnl))), bw = (W - pad * 2) / sh.length, mid = H / 2 - 6;
+  const bars = sh.map((d, i) => {
+    const h = (Math.abs(d.pnl) / mx) * (mid - 20), x = pad + i * bw + 6, y = d.pnl >= 0 ? mid - h : mid;
+    return `<rect x="${x}" y="${y}" width="${bw - 12}" height="${Math.max(1, h)}" rx="2" fill="${d.pnl >= 0 ? "var(--dk-up)" : "var(--dk-dn)"}"/><text x="${x + (bw - 12) / 2}" y="${d.pnl >= 0 ? y - 5 : y + h + 12}" text-anchor="middle" class="hs-v">${sgn(d.pnl).replace(".00", "")}</text><text x="${x + (bw - 12) / 2}" y="${H - 4}" text-anchor="middle" class="hs-x${d.sh === 0 ? " now" : ""}">${d.sh > 0 ? "+" : ""}${Math.round(d.sh * 100)}%</text>`;
+  }).join("");
+  return `<svg viewBox="0 0 ${W} ${H}" class="hs-svg"><line x1="${pad}" x2="${W - pad}" y1="${mid}" y2="${mid}" stroke="var(--dk-bd)"/>${bars}</svg>`;
+}
+function curveSvg(c) {
+  if (c.length < 2) return '<p class="hs-n">Not enough settled trades to draw a record.</p>';
+  const W = 560, H = 150, v = c.map((d) => d.v), lo = Math.min(0, ...v), hi = Math.max(0, ...v), r = hi - lo || 1;
+  const X = (i) => 8 + (i / (c.length - 1)) * (W - 16), Y = (y) => 10 + (1 - (y - lo) / r) * (H - 24);
+  const pts = c.map((d, i) => `${X(i).toFixed(1)},${Y(d.v).toFixed(1)}`).join(" L");
+  return `<svg viewBox="0 0 ${W} ${H}" class="hs-svg"><line x1="8" x2="${W - 8}" y1="${Y(0)}" y2="${Y(0)}" stroke="var(--dk-bd)" stroke-dasharray="3 3"/><path d="M${pts}" fill="none" stroke="#151515" stroke-width="1.8" stroke-linejoin="round"/><circle cx="${X(c.length - 1)}" cy="${Y(v[v.length - 1])}" r="3.4" fill="#ff5a1f"/></svg>`;
+}
+function heatHtml(b) {
+  if (!b.rows.length) return '<p class="hs-n">No open tickets.</p>';
+  const mx = Math.max(1, ...b.rows.flatMap((c) => c.sh.map(Math.abs)));
+  const head = b.SH.map((x) => `<th class="${x === 0 ? "now" : ""}">${x > 0 ? "+" : ""}${Math.round(x * 100)}%</th>`).join("");
+  const rows = b.rows.map((c) => `<tr><th class="hm-c">${esc(c.gpu)}</th>${c.sh.map((v) => `<td style="background:${v >= 0 ? `rgba(45,95,58,${(0.1 + 0.55 * Math.abs(v) / mx).toFixed(2)})` : `rgba(139,32,32,${(0.1 + 0.55 * Math.abs(v) / mx).toFixed(2)})`}">${sgn(v).replace(".00", "")}</td>`).join("")}</tr>`).join("");
+  return `<table class="hs-hm"><tr><th></th>${head}</tr>${rows}</table>`;
+}
+// The ruler is the Hourly mark: 60 ticks, one per minute.
+const ruler = (n = 60) => `<div class="hs-rule">${Array.from({ length: n }, (_, i) => `<i class="${i % 5 === 0 ? "m" : ""}"></i>`).join("")}</div>`;
+function dialSvg(b) {
+  const R = 78, C = 100, left = b.nextExp ? Math.max(0, b.nextExp - Date.now() / 1000) : 0, f = b.nextExp ? 1 - Math.min(1, left / 86400) : 0;
+  const ticks = Array.from({ length: 60 }, (_, i) => {
+    const a = (i / 60) * Math.PI * 2 - Math.PI / 2, big = i % 5 === 0, r1 = R - (big ? 12 : 7), on = i / 60 < f;
+    return `<line x1="${(C + Math.cos(a) * r1).toFixed(1)}" y1="${(C + Math.sin(a) * r1).toFixed(1)}" x2="${(C + Math.cos(a) * R).toFixed(1)}" y2="${(C + Math.sin(a) * R).toFixed(1)}" stroke="${on ? "#ff5a1f" : "#4a4a46"}" stroke-width="${big ? 2.2 : 1.2}" stroke-linecap="round"/>`;
+  }).join("");
+  const t = b.nextExp ? countdown(b.nextExp) : "none";
+  return `<svg viewBox="0 0 200 200" class="hs-dial">${ticks}<text x="100" y="92" text-anchor="middle" class="d-l">NEXT EXPIRY</text><text x="100" y="116" text-anchor="middle" class="d-v">${esc(t)}</text><text x="100" y="134" text-anchor="middle" class="d-l">${b.openN} open</text></svg>`;
+}
+function payoffSvg(c, b) {
+  const W = 780, H = 310, L = 50, Rr = 18, T = 22, B = 40;
+  const ks = c.list.map((x) => x.strike), last = c.last;
+  const lo = Math.min(last * 0.75, ...ks) * 0.98, hi = Math.max(last * 1.25, ...ks) * 1.02;
+  const N = 260, pts = Array.from({ length: N + 1 }, (_, i) => { const P = lo + ((hi - lo) * i) / N; return [P, c.list.reduce((a, x) => a + x.cost - x.qty * b.win(x, P), 0)]; });
+  const mx = Math.max(1, ...pts.map((q) => Math.abs(q[1]))) * 1.2;
+  const X = (P) => L + ((P - lo) / (hi - lo)) * (W - L - Rr), Y = (v) => T + (1 - (v + mx) / (2 * mx)) * (H - T - B), y0 = Y(0);
+  const line = pts.map((q, i) => `${i ? "L" : "M"}${X(q[0]).toFixed(1)},${Y(q[1]).toFixed(1)}`).join(" ");
+  const area = `${line} L${X(hi)},${y0} L${X(lo)},${y0} Z`;
+  const grid = [-1, -0.5, 0, 0.5, 1].map((k) => `<line x1="${L}" x2="${W - Rr}" y1="${Y(k * mx * 0.83)}" y2="${Y(k * mx * 0.83)}" stroke="${k === 0 ? "#151515" : "#e6e3dc"}" stroke-width="${k === 0 ? 1.2 : 1}"/><text x="${L - 8}" y="${Y(k * mx * 0.83) + 4}" text-anchor="end" class="hs-ax">${k === 0 ? "$0" : sgn(k * mx * 0.83).replace(".00", "")}</text>`).join("");
+  const xs = [0.8, 0.9, 1, 1.1, 1.2].map((k) => `<text x="${X(last * k)}" y="${H - 20}" text-anchor="middle" class="hs-ax">${usd(last * k)}</text>`).join("");
+  const strikes = [...new Set(ks)].map((k) => `<path d="M${X(k)},${H - 36} l-5,9 h10 z" fill="#151515"/>`).join("");
+  return `<svg viewBox="0 0 ${W} ${H}" class="hs-svg"><defs><clipPath id="cu"><rect x="0" y="0" width="${W}" height="${y0}"/></clipPath><clipPath id="cd"><rect x="0" y="${y0}" width="${W}" height="${H}"/></clipPath></defs>
+    ${grid}<path d="${area}" fill="rgba(45,95,58,.28)" clip-path="url(#cu)"/><path d="${area}" fill="rgba(139,32,32,.26)" clip-path="url(#cd)"/>
+    <path d="${line}" fill="none" stroke="#151515" stroke-width="2.2" stroke-linejoin="round"/>
+    ${xs}${strikes}
+    <line x1="${X(last)}" x2="${X(last)}" y1="${T - 6}" y2="${H - B + 4}" stroke="#ff5a1f" stroke-width="1.6" stroke-dasharray="4 4"/>
+    <rect x="${X(last) - 34}" y="${T - 20}" width="68" height="18" rx="4" fill="#ff5a1f"/><text x="${X(last)}" y="${T - 7}" text-anchor="middle" class="hs-tag">NOW ${usd(last)}</text></svg>`;
+}
+function expiryStrip(b) {
+  const days = Array.from({ length: 7 }, (_, i) => { const d = new Date(Date.now() + i * 864e5).toISOString().slice(0, 10); return b.exp.find((e) => e.d === d) || { d, qty: 0, prem: 0 }; });
+  const mx = Math.max(1, ...days.map((e) => e.qty));
+  return `<div class="hs-strip">${days.map((e) => `<div class="hs-col"><b>${e.qty ? usd(e.qty, 0) : ""}</b><div class="hs-tower"><i class="p" style="height:${(e.prem / mx) * 100}%"></i><i class="r" style="height:${(Math.max(0, e.qty - e.prem) / mx) * 100}%"></i></div><span>${esc(day(e.d).slice(0, 7))}</span></div>`).join("")}</div><div class="hs-key"><i class="p"></i>premium kept <i class="r"></i>at risk</div>`;
+}
+function recordSvg(b) {
+  const c = b.curve; if (c.length < 2) return '<p class="hs-n">Too few settled tickets.</p>';
+  const W = 560, H = 170, v = c.map((d) => d.v), lo = Math.min(0, ...v), hi = Math.max(0, ...v), r = hi - lo || 1;
+  const X = (i) => 10 + (i / (c.length - 1)) * (W - 20), Y = (y) => 12 + (1 - (y - lo) / r) * (H - 28);
+  const path = c.map((d, i) => `${i ? "L" : "M"}${X(i).toFixed(1)},${Y(d.v).toFixed(1)}`).join(" ");
+  const dots = c.map((d, i) => { const prev = i ? c[i - 1].v : 0, up = d.v - prev >= 0; return `<circle cx="${X(i).toFixed(1)}" cy="${Y(d.v).toFixed(1)}" r="4" fill="${up ? "var(--dk-up)" : "var(--dk-dn)"}" stroke="#fff" stroke-width="1.5"/>`; }).join("");
+  return `<svg viewBox="0 0 ${W} ${H}" class="hs-svg"><line x1="10" x2="${W - 10}" y1="${Y(0)}" y2="${Y(0)}" stroke="#151515" stroke-width="1"/><path d="${path} L${X(c.length - 1)},${Y(0)} L${X(0)},${Y(0)} Z" fill="rgba(21,21,21,.06)"/><path d="${path}" fill="none" stroke="#151515" stroke-width="2" stroke-linejoin="round"/>${dots}</svg>`;
+}
+function donutSvg(qs) {
+  const C = 2 * Math.PI * 42; let off = 0;
+  const arcs = qs.filter((q) => q.share > 0).map((q, i) => { const len = q.share * C, el = `<circle cx="60" cy="60" r="42" fill="none" stroke="${i ? "#ff5a1f" : "#151515"}" stroke-width="14" stroke-dasharray="${len} ${C - len}" stroke-dashoffset="${-off}" transform="rotate(-90 60 60)"/>`; off += len; return el; }).join("");
+  const top = qs[0];
+  return `<svg viewBox="0 0 120 120" class="hs-donut"><circle cx="60" cy="60" r="42" fill="none" stroke="#eceae4" stroke-width="14"/>${arcs}<text x="60" y="58" text-anchor="middle" class="dn-v">${top ? pct(top.share) : "0%"}</text><text x="60" y="74" text-anchor="middle" class="dn-l">${top ? esc(top.name.replace("Venue ", "").toLowerCase()) : ""}</text></svg>`;
+}
+const rvol = (h) => { const r = h.slice(1).map((d, i) => Math.log(d[1] / h[i][1])), m = r.reduce((a, x) => a + x, 0) / (r.length || 1); return Math.sqrt(r.reduce((a, x) => a + (x - m) ** 2, 0) / Math.max(1, r.length - 1)) * Math.sqrt(365); };
+const hsSpark = (h, up) => { const v = h.map((d) => d[1]), lo = Math.min(...v), hi = Math.max(...v), r = hi - lo || 1; return `<svg viewBox="0 0 100 28" class="hs-sp2"><path d="${v.map((y, i) => `${i ? "L" : "M"}${((i / (v.length - 1)) * 100).toFixed(1)},${(26 - ((y - lo) / r) * 24).toFixed(1)}`).join(" ")}" fill="none" stroke="${up ? "var(--dk-up)" : "var(--dk-dn)"}" stroke-width="1.5"/></svg>`; };
+function chipBoard(b) {
+  return `<div class="hs-board">${S.index.map((g) => {
+    const c = b.rows.find((r) => r.gpu === g.label), h = g.history.slice(-30), on = g.label === S.hchip, ch = (n) => `<span class="${n >= 0 ? "up" : "dn"}">${n >= 0 ? "+" : ""}${(n * 100).toFixed(1)}%</span>`;
+    return `<button class="hs-chipc ${on ? "on" : ""}" data-hc="${esc(g.label)}"><div class="t"><b>${esc(g.label)}</b><i>${usd(g.last)}<small>/hr</small></i></div>${hsSpark(h, g.chg30 >= 0)}<div class="m"><span>7d ${ch(g.chg7)}</span><span>30d ${ch(g.chg30)}</span><span>vol ${(rvol(g.history.slice(-30)) * 100).toFixed(0)}%</span></div><div class="x">${c ? `${c.qty} contracts open · House ${c.lo - c.hi >= 0 ? "long" : "short"} rent` : "no open tickets"}</div></button>`;
+  }).join("")}</div>`;
+}
+function rentSvg(g, list) {
+  const h = g.history.slice(-60), W = 780, H = 260, L = 12, R = 56, T = 14, B = 24, v = h.map((d) => d[1]), ks = list.map((x) => x.strike);
+  const lo = Math.min(...v, ...ks) * 0.985, hi = Math.max(...v, ...ks) * 1.015;
+  const X = (i) => L + (i / (h.length - 1)) * (W - L - R), Y = (y) => T + (1 - (y - lo) / (hi - lo)) * (H - T - B);
+  const line = h.map((d, i) => `${i ? "L" : "M"}${X(i).toFixed(1)},${Y(d[1]).toFixed(1)}`).join(" ");
+  const grid = [0, 1, 2, 3, 4].map((i) => { const y = lo + ((hi - lo) * i) / 4; return `<line x1="${L}" x2="${W - R}" y1="${Y(y)}" y2="${Y(y)}" stroke="#ecebe6"/><text x="${W - R + 8}" y="${Y(y) + 3}" class="hs-ax">${usd(y)}</text>`; }).join("");
+  const agg = {}; list.forEach((x) => { const k = `${x.strike}|${x.direction}`; (agg[k] = agg[k] || { s: x.strike, d: x.direction, q: 0 }).q += x.qty; });
+  const kl = Object.values(agg).map((k) => `<line x1="${L}" x2="${W - R}" y1="${Y(k.s)}" y2="${Y(k.s)}" stroke="#ff5a1f" stroke-dasharray="4 4"/><rect x="${W - R + 2}" y="${Y(k.s) - 9}" width="52" height="18" rx="4" fill="#ff5a1f"/><text x="${W - R + 28}" y="${Y(k.s) + 4}" text-anchor="middle" class="hs-tag">${usd(k.s)}</text><rect x="${L + 4}" y="${Y(k.s) + 6}" width="${String(k.q + k.d).length * 7 + 56}" height="18" rx="4" fill="#fff"/><text x="${L + 10}" y="${Y(k.s) + 19}" class="hs-ax">${k.q} ${k.d} sold</text>`).join("");
+  const lp = [X(h.length - 1), Y(v[v.length - 1])];
+  return `<svg viewBox="0 0 ${W} ${H}" class="hs-svg">${grid}${kl}<path d="${line}" fill="none" stroke="#151515" stroke-width="1.6" stroke-linejoin="round"/><circle cx="${lp[0]}" cy="${lp[1]}" r="4" fill="#151515"/><text x="${L}" y="${H - 6}" class="hs-ax">${h[0][0].slice(5)}</text><text x="${W - R}" y="${H - 6}" text-anchor="end" class="hs-ax">${h[h.length - 1][0].slice(5)}</text></svg>`;
+}
+function edgeTable(list) {
+  if (!list.length) return '<p class="hs-n">No open tickets on this chip.</p>';
+  const grp = {}; list.forEach((x) => { const k = `${x.series}|${x.price}`; if (grp[k]) grp[k].qty += x.qty; else grp[k] = { ...x }; });
+  const rows = Object.values(grp).map((x) => {
+    const m = S.markets.find((k) => k.id === x.series), pH = m && m.model ? m.model.probItm : null, pW = pH == null ? null : x.direction === "higher" ? pH : 1 - pH, e = pW == null ? null : x.price - pW;
+    return `<tr><td>${x.direction === "higher" ? "Above" : "Below"} ${usd(x.strike)}</td><td>${esc(day(x.windowEnd))}</td><td>${x.qty}</td><td>${Math.round(x.price * 100)}¢</td><td>${pW == null ? "n/a" : Math.round(pW * 100) + "¢"}</td><td class="${e == null ? "" : e >= 0 ? "up" : "dn"}">${e == null ? "n/a" : (e >= 0 ? "+" : "") + Math.round(e * 100) + "¢"}</td></tr>`;
+  }).join("");
+  return `<table class="hs-tb"><tr><th>Ticket sold</th><th>Expires</th><th>Qty</th><th>Buyer paid</th><th>Model fair</th><th>House edge</th></tr>${rows}</table><p class="hs-n">Edge = price the buyer paid minus the model chance they win, per $1. Positive means the House was paid more than fair.</p>`;
+}
+function houseView() {
+  const b = houseBook();
+  if (!S.hchip || !S.index.find((g) => g.label === S.hchip)) S.hchip = (b.rows[0] && b.rows[0].gpu) || (S.index[0] && S.index[0].label);
+  const g = S.index.find((x) => x.label === S.hchip), chip = b.rows.find((c) => c.gpu === S.hchip), list = chip ? chip.list : [];
+  const live = S.vaults.find((v) => v.phase === "trading");
+  const next = S.vaults.filter((v) => v.phase === "deposits").sort((a, c) => a.epoch - c.epoch)[0];
+  const v = live && live.deposits ? live : next || live;
+  const qs = (S.activity && S.activity.quoters) || [];
+  const expPnl = b.tot.ok && b.tot.qty ? b.tot.prem - b.tot.exp : null;
+  const worst = b.shocks.reduce((a, d) => (d.pnl < a.pnl ? d : a), b.shocks[0] || { pnl: 0 });
+  const net = b.rows.reduce((a, c) => a + c.lo - c.hi, 0);
+  const kp = (k, val, cls) => `<div class="hs-k"><i>${k}</i><b class="${cls || ""}">${val}</b></div>`;
+  const tot = chip ? chip.hi + chip.lo : 0;
+  const split = chip ? `<div class="hs-split"><span>Labs hedging up <b>${chip.hi}</b></span><div class="hs-sp"><i style="width:${tot ? (chip.hi / tot) * 100 : 50}%"></i></div><span><b>${chip.lo}</b> Owners hedging down</span></div>` : "";
+  const dep = next ? `<div class="hs-dep"><div class="hs-dr"><span>$</span><input id="hdep" inputmode="decimal" value="1000"><button id="hdep-go">Underwrite</button></div><small id="hd-st">${esc(weekLabel(next.depositEnd, next.epochEnd))} · closes in ${countdown(next.depositEnd)}</small></div>` : "";
+  const fills = qs.map((q) => `<div class="hs-fl"><i style="background:${q.via === "vault" ? "#ff5a1f" : "#151515"}"></i><span>${esc(q.name)}</span><b>${q.fills}</b></div>`).join("");
+  return `<section class="hse">
+    <div class="hs-h"><h1>The House</h1><p>The counterparty on every GPU rent ticket. Buyers bet on where the hourly price of renting one AI chip lands (H100, H200, B200, A100, Ornn index). The House sells those tickets and keeps the premium.</p></div>
+    ${chipBoard(b)}
+    <div class="hs-kpis">${kp("Expected result", expPnl == null ? "n/a" : sgn(expPnl), expPnl != null && expPnl < 0 ? "dn" : "up")}${kp("Worst case", sgn(worst.pnl), worst.pnl < 0 ? "dn" : "up")}${kp("Max it pays", usd(b.tot.qty, 0))}${kp("Premium in", usd(b.tot.prem))}${kp("Net rent exposure", net === 0 ? "flat" : `${Math.abs(net)} ${net > 0 ? "long" : "short"}`)}${kp("Next expiry", b.nextExp ? countdown(b.nextExp) : "none")}</div>
+    <div class="hs-card"><div class="hs-ch"><h3>${esc(S.hchip)} rent per hour and the strikes sold</h3><span class="hs-chip">${g ? usd(g.last) : ""} now</span></div>${g ? rentSvg(g, list) : ""}${split}</div>
+    <div class="hs-grid">
+      <div class="hs-card hs-w2"><div class="hs-ch"><h3>House result at expiry, ${esc(S.hchip)}</h3></div>${chip ? payoffSvg(chip, b) : '<p class="hs-n">No open tickets.</p>'}</div>
+      <div class="hs-card"><div class="hs-ch"><h3>Tickets sold, ${esc(S.hchip)}</h3></div>${edgeTable(list)}</div>
+      <div class="hs-card"><div class="hs-ch"><h3>If rent moves, every chip</h3></div>${heatHtml(b)}</div>
+      <div class="hs-card"><div class="hs-ch"><h3>Risk by expiry day</h3></div>${expiryStrip(b)}</div>
+      <div class="hs-card"><div class="hs-ch"><h3>Settled record</h3><span class="hs-chip">${b.done.length - b.buyersWon} won · ${b.buyersWon} lost</span></div>${recordSvg(b)}</div>
+      <div class="hs-card hs-row"><div><div class="hs-ch"><h3>Who fills</h3></div>${donutSvg(qs)}</div><div class="hs-fls">${fills}</div></div>
+      <div class="hs-card"><div class="hs-ch"><h3>Weekly vault</h3><span class="hs-chip">${v ? (v.phase === "trading" ? "trading" : "open") : ""}</span></div>${v ? `<div class="hs-vl"><b>${usd(v.cash, 0)}</b><span>held · ${usd(v.venueSeed, 0)} ours · ${Math.round(v.capBps / 100)}% cap per market</span></div>` : ""}${dep}</div>
+    </div>
+    <p class="hs-foot">Digital tickets only. Test flow on ${esc((S.status && S.status.cluster) || "test")}. Hedger split is read from ticket direction, not the wallet. Too few settled tickets to call an edge.</p>
+  </section>`;
+}
+function bindHouse() {
+  $$("[data-hc]").forEach((x) => x.addEventListener("click", () => { S.hchip = x.dataset.hc; render(); }));
+  const hd = $("#hdep-go");
+  if (!hd) return;
+  hd.addEventListener("click", () => ensureWallet(async () => {
+    const nx = S.vaults.filter((v) => v.phase === "deposits").sort((a, b) => a.epoch - b.epoch)[0], st = $("#hd-st");
+    if (!nx) return;
+    try {
+      st.textContent = "Approve the deposit in your wallet.";
+      const r = await signAndSubmit(await api("vault", { type: "deposit", epoch: nx.epoch, owner: S.wallet.address, amount: Number($("#hdep").value) }));
+      alertBox("✓", "Deposited.", "Your share of the vault is in your portfolio.", r.url);
+      await Promise.all([refreshMarkets(), refreshPortfolio()]); render();
+    } catch (e) {
+      st.innerHTML = esc(e.message);
+      if (/faucet/i.test(e.message)) { st.innerHTML += ' <button class="mini" id="fz">Add test USDC</button>'; $("#fz").addEventListener("click", faucet); }
+    }
   }));
+}
+
+// ---------- home + docs ----------
+const NARRATIVE = "Lock the price of compute.";
+function hmView() {
+  const chips = S.index.map((g) => `<button class="hm-chip" data-go="desk" data-gpu="${g.code}"><b>${esc(g.label)}</b><span>$${g.last.toFixed(2)}<i>/hr</i></span></button>`).join("");
+  return `<section class="hm">
+    <p class="hm-k">Options on AI chip rent</p>
+    <h1>${NARRATIVE}</h1>
+    <p class="hm-s">Hourly shows what an AI chip costs to rent, by the hour, and lets you fix next week's price. Fully backed, settled on Solana.</p>
+    <div class="hm-a"><button class="hm-b on" data-go="desk">Trade</button><button class="hm-b" data-go="docs">Docs</button></div>
+    <div class="hm-r">${chips}</div>
+  </section>`;
+}
+function bindHm() {
+  $$("[data-go]").forEach((b) => b.addEventListener("click", () => {
+    if (b.dataset.gpu) { S.t.gpu = b.dataset.gpu; S.t.strike = null; S.t.seriesId = null; S.t.quote = null; }
+    S.view = b.dataset.go; renderMenu(); render(); window.scrollTo(0, 0);
+  }));
+}
+function docsView() {
+  const fee = S.status && S.status.feeBps != null ? `${(S.status.feeBps / 100).toFixed(1)}% of premium` : "a small share of premium";
+  const live = S.status && S.status.cluster === "mainnet-beta" ? "real USDC" : `test money on ${esc((S.status && S.status.cluster) || "a test cluster")}`;
+  return `<article class="dc">
+    <h1>Docs</h1>
+    <p class="dc-l">${NARRATIVE} Renting an AI chip has a price per hour. It moves. Hourly lets you bet on it or hedge it.</p>
+    <h2>How a ticket works</h2>
+    <ol><li>Pick a chip (H100, H200, B200, A100) and a rent level.</li><li>Choose <b>higher</b> or <b>lower</b> than that level on the settle date.</li><li>Get a firm price. You approve it in your wallet.</li><li>An oracle averages the Ornn index at expiry. The program pays the winner from escrow.</li></ol>
+    <h2>The House</h2>
+    <p>The House is the counterparty on every ticket. Anyone can underwrite it through the weekly vault and earn the premium. The House page shows its risk and edge per chip.</p>
+    <h2>For agents</h2>
+    <p>Read quotes, then hand the user a link. No agent can move funds.</p>
+    <pre>GET /hourly/api/agent/brief
+GET /hourly/api/agent/prepare?chip=H100_SXM&amp;side=higher&amp;strike=2.65&amp;date=2026-10-11&amp;amount=10
+/hourly/llms.txt</pre>
+    <h2>Fees and limits</h2>
+    <ul><li>Fee: ${fee}.</li><li>Money in use: ${live}.</li><li>Every ticket is fully collateralised in escrow.</li><li>Not audited. Ornn needs a settlement licence before real money.</li></ul>
+  </article>`;
+}
+
+function render() {
+  if (!["home", "desk", "house", "docs"].includes(S.view)) S.view = "desk";
+  const views = { home: hmView, docs: docsView, desk: deskView, house: houseView, strat: stratView, hedge: hedgeView, activity: activityView, earn: earnView };
+  CHS.W = 560; CHS.H = 300;
+  $("#desk").innerHTML = views[S.view]();
+  document.body.classList.remove("fit", "onhome", "onnote");
+  document.body.classList.add("dk");
+  document.body.classList.toggle("onhm", S.view === "home" || S.view === "docs");
+  document.body.classList.toggle("ondesk", S.view === "desk" || S.view === "strat" || S.view === "house");
+  ({ home: bindHm, docs: () => {}, desk: bindDesk, house: bindHouse, strat: bindStrat, hedge: bindHedge, activity: bindActivity, earn: bindEarn })[S.view]();
   tickClocks();
 }
 
 async function refreshMarkets() {
   try { const [m, v] = await Promise.all([api("markets"), api("vaults").catch(() => [])]); S.markets = m; S.vaults = v; } catch (_) { /* keep last */ }
 }
-async function refreshPortfolio() { if (!S.wallet) { S.portfolio = null; return; } try { S.portfolio = await api(`portfolio?owner=${S.wallet.address}`); } catch (_) { /* keep */ } }
+async function refreshPortfolio() { if (!S.wallet) { S.portfolio = null; S.stake = null; return; } try { [S.portfolio, S.stake] = await Promise.all([api(`portfolio?owner=${S.wallet.address}`), api(`stake?owner=${S.wallet.address}`).catch(() => null)]); } catch (_) { /* keep */ } }
 async function refreshActivity() { try { S.activity = await api("activity"); } catch (_) { /* keep */ } }
 
 (async function main() {
+  const rp = refParam(); if (rp) store.set("hourly.ref", rp);
   // paint from the last visit right away, then refresh everything in parallel
   try {
     const c = JSON.parse(store.get("hourly.boot") || "null");
@@ -1100,14 +1742,14 @@ async function refreshActivity() { try { S.activity = await api("activity"); } c
   if (mk) S.markets = mk;
   S.vaults = vl || S.vaults;
   if (ac) S.activity = ac;
-  if (!document.querySelector(".modal") && !(S.view === "trade" && S.t.step >= 4)) { renderMenu(); render(); }
+  if (!document.querySelector(".modal")) { renderMenu(); render(); }
   store.set("hourly.boot", JSON.stringify({ status: S.status, index: S.index, markets: S.markets, vaults: S.vaults, activity: S.activity }));
   (window.requestIdleCallback || setTimeout)(() => registerMetaMask());
   await restoreWallet();
   setInterval(async () => {
-    if (document.querySelector(".modal") || (S.view === "trade" && S.t.step >= 4)) return;
-    await Promise.all([refreshMarkets(), refreshActivity()]);
-    if (S.view === "home" || S.view === "thesis") return;
-    if (S.view !== "trade" || S.t.step <= 3) { renderMenu(); render(); }
+    if (document.querySelector(".modal")) return;
+    if (S.view === "desk" && (S.t.quote || S.t.quoting || (document.activeElement && document.activeElement.id === "amt"))) return;
+    await Promise.all([refreshMarkets(), refreshActivity(), api("index").then((i) => { if (i && i.length) S.index = i; }).catch(() => {})]);
+    renderMenu(); render();
   }, 30_000);
 })();

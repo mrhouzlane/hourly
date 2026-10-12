@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Hourly Meter specimen</title>
+<link rel="stylesheet" href="../tokens/fonts.css"><link rel="stylesheet" href="../tokens/colors.css"><link rel="stylesheet" href="../tokens/typography.css"><link rel="stylesheet" href="../tokens/spacing.css"><link rel="stylesheet" href="../tokens/base.css">
+<style>
+main { max-width: var(--measure); margin: 0 auto; padding: var(--sp-5); }
+section { border-top: var(--border-thin) solid var(--ink); padding: var(--sp-4) 0 var(--sp-5); }
+.sw { display: flex; gap: var(--sp-2); }
+.sw div { flex: 1; height: var(--sp-7); padding: var(--sp-2); font-size: var(--fs-1); display: flex; align-items: flex-end; }
+.odo { display: inline-flex; gap: var(--sp-1); font-size: var(--fs-4); }
+.odo i { font-style: normal; min-width: var(--odo-w); height: var(--odo-h); line-height: var(--odo-h); text-align: center; background: var(--hz-black); color: var(--hz-paper); }
+.odo i.hot { color: var(--hz-signal); }
+.odo i.sep { background: none; color: var(--ink); min-width: 0; }
+.btn { border: var(--border) solid var(--ink); background: var(--surface); padding: var(--sp-3) var(--sp-4); font: 500 var(--fs-2) var(--font-mono); }
+.btn.go { background: var(--accent); }
+</style></head><body><main>
+<section><h1 style="font-size:var(--fs-5)">hourly</h1><p>Wordmark and display, Bricolage Grotesque 700, tracking tight.</p><img src="../assets/lockup.svg" alt="lockup" height="64"> <img src="../assets/mark.svg" alt="mark" height="64"> <img src="../assets/mark-inverse.svg" alt="mark inverse" height="64"></section>
+<section><h2>Palette</h2><div class="sw"><div style="background:var(--hz-enamel);outline:var(--border-thin) solid var(--ink);outline-offset:calc(var(--border-thin) * -1)">enamel</div><div style="background:var(--hz-black);color:var(--hz-paper)">black</div><div style="background:var(--hz-paper)">paper</div><div style="background:var(--hz-signal)">signal</div><div style="background:var(--hz-ink-2);color:var(--hz-paper)">ink-2</div><div style="background:var(--hz-ink-3);color:var(--hz-paper)">ink-3</div><div style="background:var(--hz-red);color:var(--hz-paper)">red</div><div style="background:var(--hz-green);color:var(--hz-paper)">green</div></div></section>
+<section><h2>Data type</h2><span class="odo"><i class="sep">$</i><i>2</i><i class="sep">.</i><i>5</i><i class="hot">9</i></span><p>DM Mono 400 and 500. Last digit orange when it is the one moving.</p></section>
+<section><h2>Body</h2><p>Pick a chip, get a firm price, execute. Backed in USDC, settled on the oracle print.</p></section>
+<section><h2>Controls</h2><button class="btn">Collar</button> <button class="btn go">Execute</button> <button class="btn" disabled>Disabled</button></section>
+<section><h2>Spacing and borders</h2><p>4, 8, 12, 16, 24, 40, 64. Radius 0. Border 2px, rule 1px. No shadow.</p></section>
+</main></body></html>

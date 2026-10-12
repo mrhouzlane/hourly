@@ -81,12 +81,79 @@ async function build() {
   };
   const hot = sumBy(rows.filter((x) => now - x.ms <= 86400e3)).sort((a, b) => b.pnl - a.pnl).slice(0, 9);
   const leaders = sumBy(rows.filter((x) => now - x.ms <= 7 * 86400e3)).sort((a, b) => b.pnl - a.pnl).slice(0, 5);
+  // who filled this week's RFQs: the vault, the desk, and (later) outside quoters
+  const q = new Map();
+  for (const f of venue.state.fills || []) {
+    if (now - Date.parse(f.at) > 7 * 86400e3) continue;
+    const via = f.via === "vault" ? "vault" : "desk";
+    const e = q.get(via) || { via, fills: 0, premium: 0, wallets: new Set() };
+    e.fills += 1; e.premium += f.premium || f.price * f.qty; e.wallets.add(f.user); q.set(via, e);
+  }
+  const qtot = [...q.values()].reduce((a, e) => a + e.premium, 0);
+  const quoters = ["vault", "desk"].map((via) => {
+    const e = q.get(via) || { fills: 0, premium: 0, wallets: new Set() };
+    return { via, name: via === "vault" ? "Weekly vault" : "Venue desk", fills: e.fills, premium: e.premium, wallets: e.wallets.size, share: qtot ? e.premium / qtot : 0 };
+  }).sort((a, b) => b.premium - a.premium);
   return {
     cluster: venue.CLUSTER,
+    quoters,
     trades: rows.slice(0, 60).map(({ ms, wallet, ...rest }) => rest),
     stats: { "1h": windowStats(3600e3), "24h": windowStats(86400e3), "7d": windowStats(7 * 86400e3) },
     hot, leaders,
   };
 }
 
-module.exports = { build, pseudonym };
+// Proposed "the insured own the insurer" stake, computed for one wallet from its
+// own fills and the live vault. Not on chain. See docs/INFRA.md section 4.
+const BROKER_LEVELS = [
+  { min: 10_000, share: 0.10 }, { min: 100_000, share: 0.20 }, { min: 1_000_000, share: 0.30 }, { min: 10_000_000, share: 0.40 }, { min: 100_000_000, share: 0.50 },
+];
+const STAKE_D0 = 1_000_000; // deposits at which the mint rate has halved once
+async function stake(owner) {
+  const series = await market.markets();
+  const byId = new Map(series.map((m) => [m.id, m]));
+  let expired = 0, paid = 0, open = 0;
+  for (const f of venue.state.fills || []) {
+    if (f.user !== owner || f.side !== "buy") continue;
+    const m = byId.get(f.series);
+    if (!m || m.door !== "hedge") continue;
+    const premium = f.premium || f.price * f.qty;
+    if (!m.settled) open += premium;
+    else if (m.settled.payoffPerContract > 0) paid += premium;
+    else expired += premium;
+  }
+  const vaults = Object.values(venue.state.vaults || {});
+  const next = vaults.filter((v) => v.phase === "deposits" || (v.depositEnd && Date.now() / 1000 < v.depositEnd)).sort((a, b) => a.epoch - b.epoch)[0];
+  let deposits = 0;
+  if (next) {
+    try {
+      const a = await venue.conn.getAccountInfo(new (require("@solana/web3.js").PublicKey)(next.pubkey));
+      if (a) deposits = Number(require("./chain").decodeLpVault(a.data).deposits) / 1e6;
+    } catch (_) { /* no vault yet */ }
+  }
+  // broker levels, proposed: 28 day referred premium sets the fee share
+  const since = Date.now() - 28 * 86400e3;
+  let referred = 0; const traders = new Set();
+  for (const f of venue.state.fills || []) {
+    if (f.ref !== owner || Date.parse(f.at) < since) continue;
+    referred += f.premium || f.price * f.qty; traders.add(f.user);
+  }
+  const level = BROKER_LEVELS.filter((l) => referred >= l.min).length;
+  const cur = level ? BROKER_LEVELS[level - 1] : null, nxt = BROKER_LEVELS[level] || null;
+  const broker = {
+    referred, traders: traders.size, level, feeShare: cur ? cur.share : 0,
+    next: nxt ? { min: nxt.min, share: nxt.share } : null,
+    progress: nxt ? Math.min(1, (referred - (cur ? cur.min : 0)) / (nxt.min - (cur ? cur.min : 0))) : 1,
+    levels: BROKER_LEVELS,
+  };
+  const rate = 0.5 * Math.pow(STAKE_D0 / (STAKE_D0 + deposits), 2);
+  const shares = expired * rate;
+  return {
+    proposed: true, expired, paid, open, rate, shares, deposits,
+    share: deposits + shares > 0 ? shares / (deposits + shares) : 0,
+    epoch: next ? next.epoch : null,
+    broker,
+  };
+}
+
+module.exports = { build, pseudonym, stake };

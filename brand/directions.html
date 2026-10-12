@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Hourly directions</title>
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@1,6..72,500&family=IBM+Plex+Mono:wght@400;500&family=Instrument+Serif&family=JetBrains+Mono:wght@400;500&family=Stardos+Stencil:wght@700&family=Space+Mono:wght@400;700&family=Familjen+Grotesk:wght@500&family=Martian+Mono:wght@300;400&display=swap" rel="stylesheet">
+<style>
+:root{--g:#cfcfcf}
+*{box-sizing:border-box;margin:0}
+body{background:#e8e8e8;font:13px/1.5 "IBM Plex Mono",monospace;color:#111;padding:24px}
+h6{font:500 11px "IBM Plex Mono";letter-spacing:.08em;text-transform:uppercase;margin-bottom:16px}
+.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:24px;max-width:1400px;margin:0 auto}
+.d{padding:36px;min-height:640px;display:flex;flex-direction:column;gap:22px;position:relative}
+.d .n{position:absolute;top:16px;right:20px;font-size:11px;opacity:.6}
+.mark{height:110px;display:flex;align-items:center;gap:22px}
+.sw{display:flex;gap:0;height:44px}
+.sw i{flex:1;display:flex;align-items:flex-end;padding:4px 6px;font:400 10px "IBM Plex Mono";font-style:normal}
+.why{font-size:12px;max-width:52ch}
+.tk{padding:16px 18px;display:flex;justify-content:space-between;align-items:flex-end;margin-top:auto}
+.tk b{font-weight:500}
+/* A tally */
+.A{background:#f1ead8;color:#1b1b1b}
+.A .nm{font:italic 500 76px/1 "Newsreader",serif;letter-spacing:-.02em}
+.A .tk{border:1.5px solid #1b1b1b;border-radius:2px 8px 3px 6px / 6px 3px 8px 2px}
+.A .price{font:italic 500 44px/1 "Newsreader",serif}
+/* B isobar */
+.B{background:#e6ece3;color:#0f2a22}
+.B .nm{font:400 84px/1 "Instrument Serif",serif;letter-spacing:-.01em}
+.B .tk{background:#0f2a22;color:#e6ece3}
+.B .price{font:400 44px/1 "Instrument Serif",serif}
+.B,.B *{font-family:"JetBrains Mono",monospace}
+.B .nm,.B .price{font-family:"Instrument Serif",serif}
+/* C freight */
+.C{background:#f4c20d;color:#111}
+.C .nm{font:700 70px/1 "Stardos Stencil",serif;letter-spacing:.02em;text-transform:uppercase}
+.C,.C *:not(.nm):not(.price){font-family:"Space Mono",monospace}
+.C .tk{border:3px solid #111;background:#f4c20d}
+.C .price{font:700 40px/1 "Stardos Stencil",serif}
+/* D line */
+.D{background:#fbfbf8;color:#0b0b0b}
+.D .nm{font:500 64px/1 "Familjen Grotesk",sans-serif;letter-spacing:-.04em}
+.D,.D *:not(.nm):not(.price){font-family:"Martian Mono",monospace;font-weight:300}
+.D .tk{border-top:1px solid #0b0b0b;border-bottom:1px solid #0b0b0b;padding-left:0;padding-right:0}
+.D .price{font:500 40px/1 "Familjen Grotesk",sans-serif;letter-spacing:-.04em;color:#2430ff}
+svg{overflow:visible}
+</style></head><body>
+<div class="grid">
+
+<section class="d A"><span class="n">A / TALLY</span>
+<h6>Counting hours by hand</h6>
+<div class="mark">
+<svg width="120" height="100" viewBox="0 0 120 100" fill="none" stroke="#1b1b1b" stroke-width="5" stroke-linecap="round">
+<path d="M18 12 C17 36 20 64 18 90"/><path d="M42 10 C43 38 40 66 42 92"/><path d="M66 12 C65 38 68 62 66 90"/><path d="M90 11 C91 36 88 64 90 91"/>
+<path d="M4 70 C34 52 84 30 112 18" stroke="#d4361e" stroke-width="5"/></svg>
+<div class="nm">Hourly</div></div>
+<div class="sw"><i style="background:#f1ead8;border:1px solid #1b1b1b">paper f1ead8</i><i style="background:#1b1b1b;color:#f1ead8">ink 1b1b1b</i><i style="background:#d4361e;color:#fff">red pencil d4361e</i></div>
+<p class="why">Four bars and a slash is how people count. A month of GPU is 720 of them. The price is written, not rendered: ruled paper, one red pencil, no gradients, no glass. Type: Newsreader italic with IBM Plex Mono. Illustration: wobbly ink-pen chips and tally rows.</p>
+<div class="tk"><div><div>H100 / NOVEMBER / 720 HR</div><div class="price">$2.59</div></div><b>Sign here →</b></div></section>
+
+<section class="d B"><span class="n">B / ISOBAR</span>
+<h6>Price as terrain</h6>
+<div class="mark">
+<svg width="140" height="100" viewBox="0 0 140 100" fill="none" stroke="#0f2a22" stroke-width="2.4" stroke-linecap="round">
+<path d="M12 56 C10 26 44 8 78 14 C112 20 132 44 122 72 C112 94 66 98 38 88 C20 82 13 70 12 56Z"/>
+<path d="M30 54 C30 34 52 24 74 28 C96 32 108 48 102 66 C96 82 62 84 46 76 C34 70 30 62 30 54Z"/>
+<path d="M50 52 C52 42 66 40 76 44 C86 48 88 58 80 64 C72 70 56 66 52 60 C50 57 49 55 50 52Z"/>
+<circle cx="68" cy="54" r="4.5" fill="#ff5a36" stroke="none"/></svg>
+<div class="nm">Hourly</div></div>
+<div class="sw"><i style="background:#e6ece3;border:1px solid #0f2a22">fog e6ece3</i><i style="background:#0f2a22;color:#e6ece3">pine 0f2a22</i><i style="background:#ff5a36;color:#0f2a22">flare ff5a36</i></div>
+<p class="why">A rental price moves like weather. Charts become contour maps, the spot index is the flare dot at the summit, strikes are the rings. Nothing on a screen looks like a trading terminal. Type: Instrument Serif with JetBrains Mono.</p>
+<div class="tk"><div><div>H100 / NOVEMBER / 720 HR</div><div class="price">$2.59</div></div><b>Lock it</b></div></section>
+
+<section class="d C"><span class="n">C / FREIGHT</span>
+<h6>Compute is cargo</h6>
+<div class="mark">
+<svg width="110" height="100" viewBox="0 0 110 100" fill="none" stroke="#111" stroke-width="7">
+<rect x="6" y="6" width="98" height="88"/><path d="M26 24V76M26 50H54M54 24V76" stroke-width="9"/><path d="M70 24L92 24M70 76L92 76M81 24V76" stroke-width="9"/></svg>
+<div class="nm">Hourly</div></div>
+<div class="sw"><i style="background:#f4c20d;border:1px solid #111">hazard f4c20d</i><i style="background:#111;color:#f4c20d">stencil 111111</i><i style="background:#fff">crate white</i></div>
+<p class="why">GPUs are rented like containers. So the product wears a shipping label: stencil caps, hazard yellow, black. Loud, controversial, impossible to confuse with a DeFi app. Risk: reads industrial, not financial. Type: Stardos Stencil with Space Mono.</p>
+<div class="tk"><div><div>H100 / NOV / 720 HR</div><div class="price">$2.59</div></div><b>STAMP</b></div></section>
+
+<section class="d D"><span class="n">D / ONE LINE</span>
+<h6>A single continuous pen stroke</h6>
+<div class="mark">
+<svg width="170" height="100" viewBox="0 0 170 100" fill="none" stroke="#0b0b0b" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+<path d="M6 80 C20 80 22 30 34 30 C46 30 40 80 54 80 C66 80 62 30 74 30 C86 30 82 80 96 80 L128 80 L162 14" />
+<circle cx="162" cy="14" r="5" fill="#2430ff" stroke="none"/></svg>
+<div class="nm">hourly</div></div>
+<div class="sw"><i style="background:#fbfbf8;border:1px solid #0b0b0b">sheet fbfbf8</i><i style="background:#0b0b0b;color:#fbfbf8">line 0b0b0b</i><i style="background:#2430ff;color:#fff">ballpoint 2430ff</i></div>
+<p class="why">One unbroken line: hours tick, then the payoff kinks up. White sheet, hairlines, one ballpoint blue for the live number. Everything in the product is drawn with that same pen, charts included. Lowercase wordmark. Type: Familjen Grotesk with Martian Mono.</p>
+<div class="tk"><div><div>h100 / november / 720 hr</div><div class="price">$2.59</div></div><b>sign</b></div></section>
+
+</div></body></html>

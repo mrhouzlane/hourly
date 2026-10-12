@@ -1,0 +1,57 @@
+/* Freight colours. Three primitives, one rule: yellow is the label, black is the stencil, white is the crate. */
+:root {
+  --hz-yellow: #f4c20d;
+  --hz-yellow-deep: #d9a900;
+  --hz-black: #111111;
+  --hz-ink-2: #3a3320;
+  --hz-ink-3: #6b5f33;
+  --hz-white: #ffffff;
+  --hz-red: #c8321e;
+  --hz-green: #1f6b2a;
+
+  --bg: var(--hz-yellow);
+  --surface: var(--hz-white);
+  --ink: var(--hz-black);
+  --ink-2: var(--hz-ink-2);
+  --ink-3: var(--hz-ink-3);
+  --line: var(--hz-black);
+  --accent: var(--hz-black);
+  --on-accent: var(--hz-yellow);
+  --up: var(--hz-green);
+  --down: var(--hz-red);
+  --disabled-bg: var(--hz-yellow-deep);
+  --focus: var(--hz-white);
+}
+:root {
+  --font-stencil: "Stardos Stencil", "Arial Black", serif;
+  --font-mono: "Space Mono", ui-monospace, monospace;
+
+  /* closed scale, five steps */
+  --fs-1: 11px;
+  --fs-2: 13px;
+  --fs-3: 16px;
+  --fs-4: 32px;
+  --fs-5: clamp(44px, 8vw, 92px);
+
+  --lh-tight: 1;
+  --lh-body: 1.5;
+  --track-stencil: 0.02em;
+  --track-label: 0.08em;
+}
+:root {
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 40px;
+  --sp-7: 64px;
+
+  --radius: 0;
+  --border: 3px;
+  --border-thin: 1px;
+  --shadow: none;
+  --stamp: 4px 4px 0 var(--hz-black);
+  --ease: steps(2, end);
+  --dur: 90ms;
+}

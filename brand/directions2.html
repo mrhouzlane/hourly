@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Hourly directions 2</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;1,9..144,500&family=Spline+Sans+Mono:wght@400;600&family=Courier+Prime:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,700&family=DM+Mono:wght@400;500&display=swap">
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#e6e6e6;padding:24px;font:12px/1.5 "DM Mono",monospace;color:#111}
+.g{display:grid;grid-template-columns:repeat(3,1fr);gap:24px;max-width:1500px;margin:0 auto}
+.c{min-height:760px;padding:32px;display:flex;flex-direction:column;position:relative}
+.tag{position:absolute;right:32px;top:28px;font-size:11px;letter-spacing:.08em;opacity:.6}
+.kick{font-size:11px;letter-spacing:.1em;text-transform:uppercase;margin-bottom:28px}
+.lock{display:flex;align-items:center;gap:20px;height:120px;margin-bottom:28px}
+.sw{display:flex;height:44px;margin-bottom:20px}
+.sw div{flex:1;padding:6px 8px;font-size:10px;display:flex;align-items:flex-end}
+p{margin:0;max-width:36em}
+.stage{margin-top:auto}
+/* E specimen */
+.E{background:#efe8d8;color:#3b2f22}
+.E .wm{font:italic 500 64px/1 Fraunces,serif;letter-spacing:-.01em}
+.E .tk{border:1px solid #3b2f22;padding:14px 16px;position:relative}
+.E .tk small{font:400 10px "Spline Sans Mono";letter-spacing:.1em;text-transform:uppercase}
+.E .tk b{display:block;font:italic 500 44px/1.1 Fraunces;margin:6px 0 14px}
+.E .tk i{font:600 11px "Spline Sans Mono";font-style:normal;float:right;color:#2f6f62;text-transform:uppercase;letter-spacing:.08em}
+/* F punchcard */
+.F{background:#d9d4c5;color:#1c1a16}
+.F .wm{font:700 56px/1 "Courier Prime",monospace;letter-spacing:.02em}
+.F .card{background:#ead9a6;padding:16px 18px 14px;clip-path:polygon(22px 0,100% 0,100% 100%,0 100%,0 22px);position:relative;border-top:6px solid #c4382a}
+.F .card small{font:700 10px "Courier Prime";letter-spacing:.12em;text-transform:uppercase}
+.F .card b{display:block;font:700 40px/1.15 "Courier Prime";margin:6px 0 12px}
+.F .holes{display:grid;grid-template-columns:repeat(26,1fr);gap:3px 4px}
+.F .holes u{display:block;height:9px;background:#d9d4c5;text-decoration:none}
+.F .holes u.o{background:#ead9a6;box-shadow:inset 0 0 0 1px #c9b676;opacity:.9}
+/* G meter */
+.G{background:#d8d5ce;color:#151515}
+.G .wm{font:700 64px/1 "Bricolage Grotesque",sans-serif;letter-spacing:-.04em}
+.G .odo{display:flex;gap:4px}
+.G .odo span{width:44px;height:64px;background:#151515;color:#f3f0ea;font:500 40px/64px "DM Mono";text-align:center;position:relative;overflow:hidden}
+.G .odo span:after{content:"";position:absolute;left:0;right:0;top:50%;height:1px;background:#d8d5ce;opacity:.5}
+.G .odo span.hot{color:#ff5a1f}
+.G .odo em{font:500 40px/64px "DM Mono";font-style:normal}
+.G .row{display:flex;justify-content:space-between;align-items:flex-end;margin-top:14px}
+.G .row small{font-size:10px;letter-spacing:.1em;text-transform:uppercase}
+.G .go{background:#ff5a1f;color:#151515;font:500 13px "DM Mono";padding:12px 20px}
+</style></head><body>
+<div class="g">
+
+<section class="c E"><div class="tag">E / SPECIMEN</div>
+<div class="kick">A chip, drawn like a beetle</div>
+<div class="lock">
+<svg width="120" height="120" viewBox="0 0 120 120" fill="none" stroke="#3b2f22" stroke-width="1.4" stroke-linecap="round">
+<defs><clipPath id="d"><rect x="30" y="30" width="60" height="60"/></clipPath></defs>
+<circle cx="60" cy="60" r="56" stroke-width=".8"/>
+<rect x="30" y="30" width="60" height="60" stroke-width="2"/>
+<g clip-path="url(#d)" stroke-width=".8"><path d="M20 40L40 20M20 50L50 20M20 60L60 20M20 70L70 20M20 80L80 20M20 90L90 20M20 100L100 20M30 100L100 30M40 100L100 40M50 100L100 50M60 100L100 60M70 100L100 70M80 100L100 80"/></g>
+<rect x="46" y="46" width="28" height="28" fill="#efe8d8" stroke-width="1.6"/>
+<path d="M54 52v16M66 52v16M54 60h12" stroke-width="2.4"/>
+<path d="M38 22v8M50 22v8M62 22v8M74 22v8M38 90v8M50 90v8M62 90v8M74 90v8M22 38h8M22 50h8M22 62h8M22 74h8M90 38h8M90 50h8M90 62h8M90 74h8" stroke-width="1.6"/>
+</svg>
+<div class="wm">Hourly</div></div>
+<div class="sw"><div style="background:#efe8d8;box-shadow:inset 0 0 0 1px #3b2f22">bone efe8d8</div><div style="background:#3b2f22;color:#efe8d8">sepia 3b2f22</div><div style="background:#2f6f62;color:#efe8d8">verdigris 2f6f62</div></div>
+<p>A GPU is a specimen. Every product is a numbered plate with a hand-engraved die, Latin-style caption, and a price set as a catalogue number. Cream paper, one ink, one patina green. Illustration style: cross-hatch engraving, drawn per chip. Type: Fraunces italic with Spline Sans Mono. Risk: precious, slow to scan.</p>
+<div class="stage"><div class="tk"><small>Pl. I &middot; H100 SXM &middot; Nov &middot; 720 hr</small><b>No. 2.59</b><i>Subscribe &rarr;</i><div style="clear:both"></div></div></div>
+</section>
+
+<section class="c F"><div class="tag">F / PUNCHCARD</div>
+<div class="kick">Time-sharing, again</div>
+<div class="lock">
+<svg width="120" height="120" viewBox="0 0 120 120">
+<path d="M18 6H114V114H6V18Z" fill="#ead9a6" stroke="#1c1a16" stroke-width="3"/>
+<rect x="6" y="6" width="108" height="0" />
+<path d="M18 6L6 18" stroke="#1c1a16" stroke-width="3"/>
+<rect x="24" y="26" width="10" height="68" fill="#1c1a16"/><rect x="86" y="26" width="10" height="68" fill="#1c1a16"/><rect x="34" y="54" width="52" height="10" fill="#1c1a16"/>
+<path d="M6 106H114" stroke="#c4382a" stroke-width="8"/>
+</svg>
+<div class="wm">HOURLY</div></div>
+<div class="sw"><div style="background:#d9d4c5;box-shadow:inset 0 0 0 1px #1c1a16">desk d9d4c5</div><div style="background:#ead9a6">manila ead9a6</div><div style="background:#c4382a;color:#ead9a6">stripe c4382a</div></div>
+<p>Renting compute by the hour started in the 1960s on punched cards. Hourly is that, with an index price. Every position is a card: manila stock, red stripe, notched corner, the price punched as holes. Typewriter mono, no second typeface. Illustration: the card itself, drawn flat. Risk: nostalgic, may read costume.</p>
+<div class="stage"><div class="card"><small>H100 SXM / NOV / 720 HR</small><b>$2.59</b>
+<div class="holes" id="holes"></div></div></div>
+</section>
+
+<section class="c G"><div class="tag">G / METER</div>
+<div class="kick">Billed like electricity</div>
+<div class="lock">
+<svg width="120" height="120" viewBox="0 0 120 120">
+<rect x="10" y="22" width="48" height="76" fill="#151515"/><rect x="62" y="22" width="48" height="76" fill="#151515"/>
+<path d="M20 60V36H48V60" fill="none" stroke="#f3f0ea" stroke-width="7"/>
+<path d="M72 98V74H100V98" fill="none" stroke="#f3f0ea" stroke-width="7" transform="translate(0,-12)"/>
+<rect x="10" y="59" width="100" height="2" fill="#ff5a1f"/>
+</svg>
+<div class="wm">hourly</div></div>
+<div class="sw"><div style="background:#d8d5ce;box-shadow:inset 0 0 0 1px #151515">enamel d8d5ce</div><div style="background:#151515;color:#f3f0ea">black 151515</div><div style="background:#ff5a1f">signal ff5a1f</div></div>
+<p>Compute is a utility, so the product is a meter. Prices and balances roll like odometer digits in black windows on enamel grey; orange marks only the digit that is moving. The logo is a digit caught mid-roll. Bricolage Grotesque lowercase with DM Mono. Illustration: none, the numbers are the picture. Risk: closest to a normal fintech.</p>
+<div class="stage">
+<div class="odo"><span>$</span><span>2</span><em>.</em><span>5</span><span class="hot">9</span></div>
+<div class="row"><small>H100 / NOV / 720 hr</small><div class="go">Take it</div></div></div>
+</section>
+
+</div>
+<script>
+const h=document.getElementById("holes");
+const pat=[1,0,1,1,0,0,1,0,1,0,1,1,0,1,0,0,1,1,0,1,0,1,0,0,1,0, 0,1,0,1,1,0,1,1,0,0,1,0,1,0,1,0,1,0,1,1,0,1,0,0,1,1];
+pat.forEach(v=>{const u=document.createElement("u");if(v)u.className="o";h.appendChild(u)});
+</script>
+</body></html>

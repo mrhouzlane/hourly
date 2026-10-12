@@ -1,0 +1,31 @@
+:root {
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 40px;
+  --sp-7: 64px;
+
+  --radius: 0;
+  --border: 2px;
+  --border-thin: 1px;
+  --shadow: none;
+  --ease: ease-out;
+  --dur: 120ms;
+
+  --bar-h: 56px;
+  --ctl-h: 36px;
+  --mark-s: 32px;
+  --measure: 1000px;
+  --measure-text: 560px;
+  --input-w: 84px;
+  --tile-s: 28px;
+  --dot-s: 8px;
+}
+:root {
+  --odo-w: 0.62em;
+  --odo-h: 1.15em;
+  --crate-gap: 16px;
+}
+:root { --odo-gap: 2px; }

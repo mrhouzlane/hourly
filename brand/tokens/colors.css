@@ -1,0 +1,26 @@
+/* Meter colours. Four primitives. Black is the window, paper is the digit, enamel is the housing, signal is the one thing moving. */
+:root {
+  --hz-enamel: #d8d5ce;
+  --hz-black: #151515;
+  --hz-paper: #f3f0ea;
+  --hz-signal: #ff5a1f;
+  --hz-ink-2: #3b3935;
+  --hz-ink-3: #6a665e;
+  --hz-enamel-deep: #c4c0b7;
+  --hz-red: #b3261e;
+  --hz-green: #2e6b3a;
+
+  --bg: var(--hz-enamel);
+  --surface: var(--hz-paper);
+  --ink: var(--hz-black);
+  --ink-2: var(--hz-ink-2);
+  --ink-3: var(--hz-ink-3);
+  --line: var(--hz-black);
+  --accent: var(--hz-signal);
+  --on-accent: var(--hz-black);
+  --up: var(--hz-green);
+  --down: var(--hz-red);
+  --disabled-bg: var(--hz-enamel-deep);
+  --focus: var(--hz-signal);
+  --scrim: rgba(21, 21, 21, 0.72);
+}

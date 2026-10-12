@@ -1,0 +1,24 @@
+/* Freight colours. Three primitives, one rule: yellow is the label, black is the stencil, white is the crate. */
+:root {
+  --hz-yellow: #f4c20d;
+  --hz-yellow-deep: #d9a900;
+  --hz-black: #111111;
+  --hz-ink-2: #3a3320;
+  --hz-ink-3: #6b5f33;
+  --hz-white: #ffffff;
+  --hz-red: #c8321e;
+  --hz-green: #1f6b2a;
+
+  --bg: var(--hz-yellow);
+  --surface: var(--hz-white);
+  --ink: var(--hz-black);
+  --ink-2: var(--hz-ink-2);
+  --ink-3: var(--hz-ink-3);
+  --line: var(--hz-black);
+  --accent: var(--hz-black);
+  --on-accent: var(--hz-yellow);
+  --up: var(--hz-green);
+  --down: var(--hz-red);
+  --disabled-bg: var(--hz-yellow-deep);
+  --focus: var(--hz-white);
+}

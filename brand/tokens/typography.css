@@ -1,0 +1,16 @@
+:root {
+  --font-display: "Bricolage Grotesque", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "DM Mono", ui-monospace, monospace;
+
+  /* closed scale, five steps */
+  --fs-1: 11px;
+  --fs-2: 13px;
+  --fs-3: 16px;
+  --fs-4: 32px;
+  --fs-5: clamp(48px, 9vw, 104px);
+
+  --lh-tight: 0.95;
+  --lh-body: 1.5;
+  --track-display: -0.04em;
+  --track-label: 0.1em;
+}

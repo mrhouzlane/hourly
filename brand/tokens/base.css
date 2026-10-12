@@ -1,0 +1,5 @@
+*, *::before, *::after { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 400 var(--fs-2)/var(--lh-body) var(--font-mono); }
+h1, h2, h3 { font-family: var(--font-display); font-weight: 700; letter-spacing: var(--track-display); line-height: var(--lh-tight); margin: 0; }
+a { color: var(--ink); text-decoration-thickness: var(--border-thin); text-underline-offset: var(--sp-1); }
+:focus-visible { outline: var(--border) solid var(--focus); outline-offset: var(--border); }

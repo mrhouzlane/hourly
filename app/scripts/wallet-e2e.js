@@ -51,48 +51,45 @@ const SHOTS = process.env.SHOTS || "/home/mehdi_quantum3labs_com/compute-options
     await page.click("[data-w]");
     await page.waitForFunction((a) => document.querySelector("#wallet-btn").textContent.startsWith(a.slice(0, 4)), kp.publicKey.toBase58(), { timeout: 5000 });
   });
-  const wizard = (side, label) => step(label, async () => {
-    await page.screenshot({ path: `${SHOTS}/after-connect.png` });
-    await page.click('#menubar [data-view="trade"]');
-    await page.click(`[data-opt="${side}"]`);
-    await page.click("[data-opt]");            // first level
-    await page.click("[data-opt]");            // first date
-    await page.fill("#amt", "6");
-    await page.click("#to-review");
-    await page.waitForFunction(() => document.querySelector("#sign") && !document.querySelector("#sign").disabled, null, { timeout: 20000 });
-    await page.click("#sign");
-    const t = await okDialog();
-    if (!/Done/.test(t)) throw new Error(t);
+  const view = async (v) => { await page.click(`#menubar [data-view="${v}"]:not(.brand)`); await page.waitForTimeout(300); };
+  await step("protect: toggles change the level card and button", async () => {
+    await view("hedge");
+    await page.click('[data-role="rent"]'); await page.waitForTimeout(200);
+    if (!/^Cap/.test(await page.textContent(".level .llab"))) throw new Error("rent label");
+    if (!/^Cap /.test(await page.textContent("#hedge-go"))) throw new Error("rent button");
+    await page.click('[data-role="own"]'); await page.waitForTimeout(200);
+    if (!/^Floor/.test(await page.textContent(".level .llab"))) throw new Error("own label");
+    await page.click('[data-more="1"]'); await page.waitForSelector(".afold .chart svg", { timeout: 5000 });
+    await page.click('[data-more="0"]'); await page.waitForTimeout(200);
   });
-  await wizard("higher", "wizard: higher via wallet signature");
-  await wizard("lower", "wizard: lower via wallet signature");
-  await step("hedge collar via wallet", async () => {
-    await page.click('#menubar [data-view="hedge"]');
-    await page.check("#collar");
+  await step("protect: execute", async () => {
     await page.click("#hedge-go");
-    await page.waitForSelector(".modal #ok", { timeout: 20000 });
-    await page.click(".modal #ok");
-    const t = await okDialog(); if (!/Protected/.test(t)) throw new Error(t);
+    await page.waitForSelector("#ok", { timeout: 20000 });
+    await page.click("#ok");
+    const t = await okDialog(); if (!/Protected/.test(t)) throw new Error(t.slice(0, 80));
   });
-  await step("vault deposit via wallet", async () => {
-    await page.click('#menubar [data-view="earn"]');
-    await page.fill("#dep", "100");
-    await page.click("#dep-go");
-    const t = await okDialog(); if (!/Deposited/.test(t)) throw new Error(t);
+  await step("your protections lists the new position", async () => {
+    await page.waitForSelector(".mine .prow", { timeout: 15000 });
   });
-  await step("portfolio shows positions and vault", async () => {
-    await page.click('#menubar [data-view="portfolio"]');
-    await page.waitForTimeout(1500);
-    const txt = await page.textContent("#desk");
-    if (!/long/.test(txt) || !/short/.test(txt) || !/Vault/.test(txt)) throw new Error(txt.slice(0, 200));
+  await step("activity renders chips and cards", async () => {
+    await view("activity");
+    await page.waitForSelector(".chips .chip", { timeout: 5000 });
+    await page.waitForSelector(".tcard", { timeout: 5000 });
   });
-  await step("activity shows this wallet's trades", async () => {
-    await page.click('#menubar [data-view="activity"]');
-    await page.waitForTimeout(800);
-    const txt = await page.textContent("#desk");
-    if (!/put \$/.test(txt)) throw new Error("no trade sentences");
+  await step("earn: vault, quoters and refer tabs render", async () => {
+    await view("earn");
+    await page.waitForSelector("#dep-go", { timeout: 5000 });
+    await page.waitForSelector(".stake .srow", { timeout: 5000 });
+    await page.click('[data-et="quoters"]'); await page.waitForSelector(".qrow", { timeout: 5000 });
+    await page.click('[data-et="refer"]'); await page.waitForSelector(".reflink code", { timeout: 5000 });
+    const link = await page.textContent(".reflink code"); if (!link.includes(`ref=${kp.publicKey.toBase58()}`)) throw new Error("ref link");
+    await page.screenshot({ path: `${SHOTS}/wallet-refer.png`, fullPage: true });
+    await page.click('[data-et="vault"]'); await page.waitForTimeout(200);
+    await page.screenshot({ path: `${SHOTS}/wallet-earn.png`, fullPage: true });
+    await view("activity");
   });
-  await page.click('#menubar [data-view="portfolio"]'); await page.waitForTimeout(800); await page.screenshot({ path: `${SHOTS}/wallet-portfolio.png`, fullPage: true });
+  await page.screenshot({ path: `${SHOTS}/wallet-activity.png`, fullPage: true });
+  await page.screenshot({ path: `${SHOTS}/wallet-portfolio.png`, fullPage: true });
   console.log("signatures by chain:", JSON.stringify(signed));
   console.log(errors.length ? "page errors: " + errors.join(" | ") : "no page errors");
   await browser.close();

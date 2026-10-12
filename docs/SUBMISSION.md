@@ -1,20 +1,20 @@
 # Colosseum Crypto World's Fair submission (draft)
 
-Due 2026-10-12. Brackets = facts only Mehdi has.
+Due Mon 2026-10-13 14:59 SGT. Brackets = facts only Mehdi has. Every claim below must be re-checked against a live run before submitting (Tests re-run 2026-10-11, see Proof. Still UNVERIFIED: the Switchboard devnet and mainnet queue claim, the browser wallet test, the load test).
 
 **Project name:** Hourly
 
 **One line:** Options on the rental price of AI chips, settled on Solana by oracle.
 
-**Description.** Renting an Nvidia H100 cost $2.64 an hour on Ornn's October 3 print, and H200 rose 50% in three months. GPU clouds lose when rental prices fall and AI companies lose when they rise. CME lists plain futures for institutions; Kalshi and Polymarket list yes/no bets. Nobody offers floors, caps or collars on compute, or lets anyone underwrite them. Hourly does: GPU owners floor their revenue, renters cap their cost, traders call the daily print, and anyone can deposit USDC into a weekly vault that sells this protection and earns the premium. Every contract is fully backed in escrow and settled by a Switchboard oracle that averages Ornn's index; the Solana program checks the oracle signatures and the feed fixed at listing.
+**Description.** Renting an Nvidia H100 cost $2.64 an hour on Ornn's October 3 print, and H200 rose 32% in three months ($4.47 on Jul 11 to $5.91 on Oct 10, Ornn public history). GPU clouds lose when rental prices fall and AI companies lose when they rise. Today the live ways to bet on it are yes/no markets on Kalshi and Polymarket and perps on Bitget and Hyperliquid; CME and ICE futures are still awaiting CFTC review. I found no one offering a loss-capped option, a floor, cap or collar, on compute, or lets anyone underwrite them. Hourly does: GPU owners floor their revenue, renters cap their cost, traders call the daily print, and anyone can deposit USDC into a weekly vault that sells this protection and earns the premium. Every contract is fully backed in escrow and settled by a Switchboard oracle that averages Ornn's index; the Solana program checks the oracle signatures and the feed fixed at listing.
 
 **Blockchain integrations.**
 - Solana program (Anchor 1.1): fully collateralized options, RFQ fills co-signed by maker and taker, weekly underwriting vaults with per-market caps, 1% protocol fee, pause switch.
-- Switchboard On-Demand: custom feed that averages Ornn's daily prints; verified on Solana devnet and mainnet queues.
+- Switchboard On-Demand: custom feed that averages Ornn's daily prints; feed built; queue verification [re-check before submitting].
 - Wallet Standard: Phantom, Solflare, Backpack, MetaMask (via MetaMask Connect Solana).
 - EVM port (Solidity, EIP-712 quotes) with Switchboard and Chainlink Functions adapters; settlement pending live oracle support on EVM.
 
-**Proof it works.** 11 Solana program tests plus a 300-seed fuzz (escrow equals open interest times collateral at every step; no USDC created or lost). 37 EVM tests. 500 concurrent trades from 100 users with zero failures. A real-browser wallet test passes connect, buy, write, collar, vault deposit and close.
+**Proof it works.** Run 2026-10-11 on the local validator: 14 Solana program tests pass (lifecycle, security, math), including a 300-seed fuzz where escrow stays solvent and no USDC is created or lost. 51 EVM tests pass, 0 fail (9 skipped). An API end-to-end run passes faucet, quote, buy, write, replay rejection, tamper rejection and a balance match. Not re-run today, so not claimed: the load test and the browser wallet test.
 
 **Links.**
 - App: http://34.177.105.21/hourly/ [move to devnet once SOL arrives; add domain if any]
@@ -26,4 +26,4 @@ Due 2026-10-12. Brackets = facts only Mehdi has.
 
 **Team.** [Mehdi Rhouzlane: background] [location] [others]
 
-**Known limits, stated plainly.** Ornn's terms require a settlement licence before real money (request sent: [date]). Not audited; internal review in docs/SECURITY_REVIEW.md. Backup settler key can act only if the oracle is silent for 72 hours.
+**Known limits, stated plainly.** Test money only. Ornn's data terms for on-chain settlement use are unconfirmed, and no licence request has been sent yet; real money waits on that answer. Not audited; internal review in docs/SECURITY_REVIEW.md. Backup settler key can act only if the oracle is silent for 72 hours.

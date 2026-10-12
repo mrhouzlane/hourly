@@ -1,0 +1,17 @@
+:root {
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 40px;
+  --sp-7: 64px;
+
+  --radius: 0;
+  --border: 3px;
+  --border-thin: 1px;
+  --shadow: none;
+  --stamp: 4px 4px 0 var(--hz-black);
+  --ease: steps(2, end);
+  --dur: 90ms;
+}
