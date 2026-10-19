@@ -7,3 +7,6 @@ app/state/
 app/sbquote.mjs
 preview-ledger/
 .claude/
+
+# third-party index data, not ours to redistribute
+app/data/*.json
