@@ -430,7 +430,7 @@ function positionsWindow() {
   else {
     const rows = p.rows.map((r) => {
       const pred = r.door === "predict";
-      const name = pred ? `${r.gpu} ${r.short > r.long ? "floor" : "cap"} $${r.strike.toFixed(2)}` : `${r.gpu} ${monthOf(r.windowStart)} ${r.kind === "put" ? "floor" : "cap"} $${r.strike.toFixed(2)}`;
+      const name = pred ? `${r.gpu} ${r.long && r.short ? "floor and cap" : r.short ? "floor" : "cap"} $${r.strike.toFixed(2)}` : `${r.gpu} ${monthOf(r.windowStart)} ${r.kind === "put" ? "floor" : "cap"} $${r.strike.toFixed(2)}`;
       const when = pred ? day(r.windowEnd) : monthOf(r.windowStart);
       const value = r.status === "settled" ? `paid out at $${r.settled.price.toFixed(4)}` : usd((r.markPerContract ?? 0) * (r.long - r.short));
       return `<tr><td>${esc(name)}<div class="muted">${when} · ${r.status === "open" ? `closes in ${countdown(r.tradingEnd)}` : esc(r.status)}</div></td><td>${r.long ? `long ${r.long}` : ""} ${r.short ? `short ${r.short}` : ""}</td><td class="r">${value}</td><td class="r">${actions(r)}</td></tr>`;
@@ -593,7 +593,30 @@ function houseView() {
     <p class="sub">The other side of every ticket, backed by a weekly vault.</p>
     <div class="kp"><div><i>Epoch ${cur ? cur.epoch : ""} deposits</i><b>${cur ? usd(cur.deposits, 0) : "$0"}</b></div><div><i>Premium in, all epochs</i><b>${usd(prem)}</b></div><div><i>Open series</i><b>${open}</b></div></div>
     ${win("Weekly vault", `<table class="tb"><tr><th>Epoch</th><th>Ends</th><th>Phase</th><th class="r">Deposits</th><th class="r">Premium</th><th class="r">Seeded by us</th></tr>${rows}</table>`, '<span class="tag ghost">Seeded by us</span>', "vault")}
+    <div class="dep"><button class="cta" id="hdep-go">Deposit test USDC</button><p class="st" id="hd-st"></p></div>
   </div>`;
+}
+
+// unchanged from mac.js bindHouse deposit flow, amount asked in a dialog
+function bindHouse() {
+  const hd = $("#hdep-go");
+  if (hd) hd.addEventListener("click", () => ensureWallet(() => {
+    const nx = S.vaults.filter((v) => v.phase === "deposits").sort((a, b) => a.epoch - b.epoch)[0], st = $("#hd-st");
+    if (!nx) { st.textContent = "No vault is taking deposits right now."; return; }
+    dialog(`<div class="icon">$</div><b>Deposit, epoch ${nx.epoch}</b><p class="small">Deposits close ${dayS(nx.depositEnd)}. Test USDC only.</p><p><input id="hdep" inputmode="decimal" value="1000" aria-label="Amount in USDC"></p><div class="actions"><button class="btn" data-close>Cancel</button><button class="btn default" id="ok">Sign with wallet</button></div>`,
+      (m, close) => $("#ok", m).addEventListener("click", async () => {
+        const amount = Number($("#hdep", m).value); close();
+        try {
+          st.textContent = "Approve the deposit in your wallet.";
+          const r = await signAndSubmit(await api("vault", { type: "deposit", epoch: nx.epoch, owner: S.wallet.address, amount }));
+          alertBox("✓", "Deposited.", "Your share of the vault is in your positions.", r.url);
+          await Promise.all([refreshMarkets(), refreshPortfolio()]); render();
+        } catch (e) {
+          st.innerHTML = esc(e.message);
+          if (/faucet/i.test(e.message)) { st.innerHTML += ' <button id="fz">Add test USDC</button>'; $("#fz").addEventListener("click", faucet); }
+        }
+      }));
+  }));
 }
 
 // ---------- docs ----------
@@ -641,7 +664,7 @@ function render() {
   const views = { home: homeView, desk: deskView, index: indexView, house: houseView, docs: docsView, access: accessView };
   $("#desk").innerHTML = views[S.view]();
   document.body.dataset.view = S.view;
-  ({ home: bindHome, desk: bindDesk, index: bindIndex, house: () => {}, docs: bindDocs, access: bindAccess })[S.view]();
+  ({ home: bindHome, desk: bindDesk, index: bindIndex, house: bindHouse, docs: bindDocs, access: bindAccess })[S.view]();
 }
 async function refreshMarkets() {
   try { const [m, v] = await Promise.all([api("markets"), api("vaults").catch(() => [])]); S.markets = m; S.vaults = v; } catch (_) { /* keep last */ }
@@ -669,15 +692,16 @@ window.addEventListener("hashchange", () => { const v = HASH[location.hash.slice
   store.set("hourly.cleanboot", JSON.stringify({ status: S.status, index: S.index, markets: S.markets, vaults: S.vaults, activity: S.activity }));
   (window.requestIdleCallback || setTimeout)(() => registerMetaMask());
   await restoreWallet();
-  let last = "";
+  let last = "", tick = 0;
   const busy = () => document.hidden || document.querySelector(".modal") || S.t.quote || S.t.quoting || (document.activeElement && /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName));
   setInterval(async () => {
     if (busy() || !["desk", "house", "index"].includes(S.view)) return;
-    await Promise.all([api("markets").then((m) => { S.markets = m; }).catch(() => {}), api("vaults").then((v) => { S.vaults = v; }).catch(() => {}), refreshPortfolio()]);
+    const slow = ++tick % 4 === 0;
+    await Promise.all([api("markets").then((m) => { S.markets = m; }).catch(() => {}), slow && S.view === "house" ? api("vaults").then((v) => { S.vaults = v; }).catch(() => {}) : null, slow ? refreshPortfolio() : null]);
     if (busy()) return;
     const sig = JSON.stringify([S.markets, S.vaults, S.portfolio]);
     if (sig === last) return;
     const first = last === ""; last = sig;
     if (!first) { const y = window.scrollY; render(); window.scrollTo(0, y); }
-  }, 8_000);
+  }, 10_000);
 })();

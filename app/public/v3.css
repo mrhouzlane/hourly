@@ -257,3 +257,4 @@ body.busy { cursor: progress; }
 .fl, .fg { margin-bottom: 16px; }
 .acc { margin-top: 110px; }
 .acc .body { padding-bottom: 24px; }
+.dep { width: 320px; margin: 22px 0 0 auto; } @media (max-width: 760px) { .dep { width: auto; } }

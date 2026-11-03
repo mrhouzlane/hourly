@@ -1,6 +1,6 @@
 # Hourly
 
-> Price protection and bets on the hourly rental price of AI chips (H100, H200, B200, A100), priced off the Ornn OCPI index and settled on Solana by oracle. Test money unless the cluster says mainnet.
+> Floors and caps on the hourly rental price of AI chips (H100, H200, B200, A100), priced off a third party GPU rent index and paid out on Solana by oracle. Test money unless the cluster says mainnet.
 
 For agents: read quotes, then hand the user a link. The user reviews, gets a firm price and signs. No agent can move funds.
 

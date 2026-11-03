@@ -24,7 +24,17 @@ const STATE_FILE = process.env.STATE_FILE || path.join(ROOT, "state", `${CLUSTER
 const ORACLE_QUEUE = new PublicKey(process.env.ORACLE_QUEUE ||
   (CLUSTER === "mainnet" ? "A43DyUGA7s8eXPxqEjJY6EBu1KKbNgfxF8h17VAHn13w" : "EYiAmGSdsQTuCw413V5BzaruWuCCSDgTPtBGvLkXHbe7"));
 
-const conn = new Connection(RPC_URL, "confirmed");
+// Public devnet RPC rate-limits per method (HTTP 429). Back off and retry instead of failing the request.
+const rpcFetch = async (url, opts) => {
+  let res;
+  for (let i = 0; i < 7; i++) {
+    res = await fetch(url, opts);
+    if (res.status !== 429) return res;
+    await new Promise((r) => setTimeout(r, Math.min(8000, 400 * 2 ** i) + Math.random() * 300));
+  }
+  return res;
+};
+const conn = new Connection(RPC_URL, { commitment: "confirmed", fetch: rpcFetch, disableRetryOnRateLimit: true });
 
 function loadKey(name) {
   const raw = JSON.parse(fs.readFileSync(path.join(KEYS_DIR, `${name}.json`), "utf8"));

@@ -180,7 +180,7 @@ const routes = {
     const ix = await indexSummary();
     const open = (await market.markets()).filter((m) => m.door === "predict" && m.status === "open");
     return {
-      about: "Hourly: price protection for AI-chip rental prices (hourly rent caps and bets) (Ornn OCPI), Solana, test money unless cluster says mainnet. Agents read here and hand the user a link; the user reviews, gets a firm price and signs. No agent can move funds.",
+      about: "Hourly: floors and caps on AI chip rental prices, Solana, test money unless cluster says mainnet. Agents read here and hand the user a link; the user reviews, gets a firm price and signs. No agent can move funds.",
       cluster: venue.CLUSTER, asOf: new Date().toISOString(),
       chips: ix.map((g) => ({
         code: g.code, label: g.label, last: g.last, lastDate: g.lastDate, change7d: g.chg7, change30d: g.chg30,
@@ -212,7 +212,7 @@ const routes = {
     return {
       series: id, feedId: meta.feedId, definition: ornn.oracleFeed(meta.underlying, meta.dates),
       crossbarUrl: `https://crossbar.switchboardlabs.xyz/v2/fetch/${meta.feedId.replace(/^0x/, "")}`,
-      rule: "Mean of the Ornn OCPI daily prints stamped on the window dates (4pm New York). Computed by Switchboard oracles; the program checks the oracle signatures and this feed hash.",
+      rule: "Mean of the third party GPU rent index daily prints stamped on the window dates (4pm New York). Computed by Switchboard oracles; the program checks the oracle signatures and this feed hash.",
     };
   },
 
@@ -223,7 +223,9 @@ const routes = {
 
   "GET /api/vaults": async () => {
     const nowS = Math.floor(Date.now() / 1000);
-    const list = await keeper.readVaults();
+    // vault state moves on deposits and fills only; a 20 s cache keeps the public RPC under its limit
+    if (!vaultCache.list || Date.now() - vaultCache.at > 20_000) vaultCache.list = await keeper.readVaults(), vaultCache.at = Date.now();
+    const list = vaultCache.list;
     return list.map((v) => ({ ...v, phase: market.vaultPhase({ depositEnd: v.depositEnd, epochEnd: v.epochEnd, openSeries: v.openSeries }, nowS) }));
   },
 
@@ -240,6 +242,7 @@ const routes = {
   "POST /api/submit": async (req, url, body, ip) => {
     if (!allow(`s:${ip}`, 30, 60_000)) throw venue.httpError(429, "Too many submissions. Wait a minute.");
     const r = await venue.submitUserTx({ id: body.id, tx: body.tx, signature: body.signature });
+    vaultCache.at = 0;
     if (r.meta.kind === "fill") {
       for (const l of r.meta.legs || []) venue.state.fills.push({
         tx: r.signature, at: new Date().toISOString(), user: r.meta.user, series: l.series, side: l.side,
@@ -295,6 +298,7 @@ const routes = {
   },
 };
 
+const vaultCache = { at: 0, list: null };
 const server = http.createServer(async (req, res) => {
   res.__gzip = /\bgzip\b/.test(String(req.headers["accept-encoding"] || ""));
   const url = new URL(req.url, "http://localhost");
