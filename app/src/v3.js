@@ -357,8 +357,8 @@ function deskView() {
   return `<div class="pg trade"><h1>Trade the ${esc(gpuLabel(code))} hour.</h1><div class="tgrid">${exposureWindow()}${ticketWindow()}</div>${positionsWindow()}</div>`;
 }
 // ---------- my exposure: inputs stay in this page only (never stored, never sent) ----------
-const EXP = { gpus: "", ends: "", rate: "", pick: "mid" };
-const RATE_PICKS = [["low", "Low"], ["mid", "Mid"], ["high", "High"]];
+const EXP = { gpus: "64", ends: "2026-12-15", rate: "", pick: "mid" };
+const RATE_PICKS = [["low", "Low"], ["mid", "Mid, the index"], ["high", "High"]];
 function expRate() { if (EXP.pick === "custom") return Number(EXP.rate); const ix = expIndex(); return ix && ix.range ? Math.round(ix.range[EXP.pick] * 100) / 100 : 0; }
 const HOURS_MONTH = 730;
 function expIndex() {
@@ -417,7 +417,8 @@ function floorPick() {
   const end = EXP.ends ? Date.parse(`${EXP.ends}T00:00:00Z`) : Date.now();
   const gap = (m) => { const a = Date.parse(`${m.windowStart}T00:00:00Z`), b = Date.parse(`${m.windowEnd}T23:59:59Z`); return end >= a && end <= b ? 0 : Math.min(Math.abs(end - a), Math.abs(end - b)); };
   const win = puts.slice().sort((x, y) => gap(x) - gap(y))[0].windowStart;
-  const target = Math.round(ix.value * 0.9 * 100) / 100;
+  if (!ix.range) return null;
+  const target = Math.round(ix.range.mid * 0.9 * 100) / 100; // index Mid minus 10%
   const m = puts.filter((x) => x.windowStart === win).reduce((p, x) => (Math.abs(x.strike - target) < Math.abs(p.strike - target) ? x : p));
   return { m, win, target, n };
 }
@@ -526,7 +527,7 @@ function lockHtml() {
     <div class="lab">Strike</div><div class="ch c4 strk">${list.map((x) => `<button data-hs="${x.id}" class="${x.id === m.id ? "on" : ""}">$${x.strike.toFixed(2)}</button>`).join("")}</div>${note}
     <div class="lab">Date</div><span class="solo">${day(m.windowStart)} to ${day(m.windowEnd)}</span>
     <div class="lab">Amount</div><span class="solo">${qn} GPU${qn > 1 ? "s" : ""}, ${(qn * m.units).toLocaleString("en-US")} hours</span>${capNote}
-    ${h.linked ? `<p class="lnk">Covering ${qn} GPU${qn > 1 ? "s" : ""} × ${m.units} h from My exposure</p>` : h.edited ? `<p class="lnk">Edited by hand <button class="mini" id="relink">Relink</button></p>` : ""}
+    ${h.linked ? `<p class="lnk">Covering ${qn} GPU${qn > 1 ? "s" : ""} × ${HOURS_MONTH} h from My exposure</p>` : h.edited ? `<p class="lnk">Edited by hand <button class="mini" id="relink">Relink</button></p>` : ""}
     <div class="pp"><div><i>Premium</i><b>${usd(prem)}</b></div><div><i>Pays up to</i><b>${usd(m.maxPayoff * qn, 0)}</b></div></div>
     ${own ? `<p class="xe">Earns at least <b>${usd(earns)} per GPU hour</b>: strike minus Premium per hour.</p>` : ""}
     <button class="cta" id="hedge-go">Lock ${monthOf(m.windowStart)}</button>
@@ -738,7 +739,7 @@ function indexView() {
   const data = IXP[g.label], days = (data && data.days) || [];
   const last = lastRanged(days);
   const panel = `<div class="ixg">${cs.map((c) => { const d = IXP[c.label], l = d && lastRanged(d.days);
-    return `<button class="ixc ${c.code === g.code ? "on" : ""}" data-ix="${c.code}"><div class="h"><b>${esc(c.label)}</b><span>${l ? usd(l.range.mid) : "--"}<small>mid</small></span></div>
+    return `<button class="ixc ${c.code === g.code ? "on" : ""}" data-ix="${c.code}"><div class="h"><b>${esc(c.label)}</b><span>${l ? usd(l.range.mid) : "--"}<small>index</small></span></div>
       ${d && d.days ? rangeChart(d.days.slice(-90), { W: 250, H: 62, R: 2, B: 3, T: 3, L: 2, axis: false }) : '<svg viewBox="0 0 250 62"></svg>'}
       <div class="c">${l ? `${usd(l.range.low)} to ${usd(l.range.high)}, ${l.range.n} sources` : d && d.error ? esc(d.error) : "Loading."}</div></button>`; }).join("")}</div>
     <div class="ixg deals">${cs.map((c) => { const d = IXP[c.label], td = (d && d.termDeals) || [];
@@ -746,8 +747,8 @@ function indexView() {
   const seg = `<span class="seg">${cs.map((c) => `<button data-ix="${c.code}" class="${c.code === g.code ? "on" : ""}">${esc(c.label)}</button>`).join("")}</span>`;
   const rg = S.ixRange === "all" ? days : days.slice(-Number(S.ixRange));
   const big = last ? `<section class="win ixbig"><div class="bh">${seg}<span class="seg">${[["30", "30d"], ["90", "90d"], ["all", "All"]].map(([k, l]) => `<button data-ixr="${k}" class="${S.ixRange === k ? "on" : ""}">${l}</button>`).join("")}</span></div>
-      <button class="num rng" id="ix-open" aria-expanded="${S.ixOpen ? "true" : "false"}"><b>${esc(g.label)}</b> ${usd(last.range.low)} to ${usd(last.range.high)}<small>mid ${usd(last.range.mid)}, ${last.range.n} sources</small></button>
-      <p class="when">Print for ${day(last.day)}, computed ${day(last.computed_at.slice(0, 10))} ${utcTime(last.computed_at)}. Low and High are the 25th and 75th percentile of the sources, Mid the median. ${onchainLink(last)}</p>
+      <button class="num rng" id="ix-open" aria-expanded="${S.ixOpen ? "true" : "false"}"><b>${esc(g.label)}</b> ${usd(last.range.low)} to ${usd(last.range.high)}<small>mid ${usd(last.range.mid)}, the Hourly Index, ${last.range.n} sources</small></button>
+      <p class="when">Print for ${day(last.day)}, computed ${day(last.computed_at.slice(0, 10))} ${utcTime(last.computed_at)}. Mid is the Hourly Index print. Low and High are the 25th and 75th percentile of the sources. ${onchainLink(last)}</p>
       ${rangeChart(rg, innerWidth < 760 ? { W: 560, H: 300, R: 58 } : {})}
       <p class="hint">${S.ixOpen ? "Where this range comes from:" : "Click the range to see each source."}</p>
       ${S.ixOpen ? sourcesHtml(last, data) : ""}</section>` : `<section class="win ixbig"><div class="bh">${seg}</div><p class="when">${data && data.error ? esc(data.error) : "Loading prints."}</p></section>`;

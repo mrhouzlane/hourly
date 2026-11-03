@@ -175,7 +175,8 @@ const routes = {
   // Hourly Index daily prints with their sources (offchain) and their devnet Memo posts (onchain), one chip per call.
   "GET /api/index/prints": async (req, url) => {
     const q = (v, p) => { const i = (v.length - 1) * p, lo = Math.floor(i), hi = Math.ceil(i); return v[lo] + (v[hi] - v[lo]) * (i - lo); };
-    const rangeOf = (ps) => { const v = (ps || []).map((x) => x.usd_hr).filter((x) => typeof x === "number").sort((a, b) => a - b); return v.length ? { low: q(v, 0.25), mid: q(v, 0.5), high: q(v, 0.75), n: v.length } : null; };
+    // Mid = the Hourly Index print itself. Low and High = 25th and 75th percentile of the sources, widened to contain the print if needed.
+    const rangeOf = (ps, value) => { const v = (ps || []).map((x) => x.usd_hr).filter((x) => typeof x === "number").sort((a, b) => a - b); if (!v.length || value === null || value === undefined) return null; return { low: Math.min(q(v, 0.25), value), mid: value, high: Math.max(q(v, 0.75), value), median: q(v, 0.5), n: v.length }; };
     const read = (f) => { const p = path.join(__dirname, "state", f); const m = fs.statSync(p).mtimeMs; const c = printsCache[f]; if (c && c.m === m) return c.v; const v = JSON.parse(fs.readFileSync(p, "utf8")); printsCache[f] = { m, v }; return v; };
     const data = read("index-prints.json");
     let posts = { chips: {} }; try { posts = read("index-posts.json"); } catch (_) { /* nothing posted yet */ }
@@ -184,8 +185,8 @@ const routes = {
     if (!days) throw venue.httpError(404, "unknown chip");
     const pc = posts.chips[gpu] || {};
     return { gpu, method: data.method, publisher: posts.publisher || null, cluster: venue.CLUSTER,
-      // Range = 25th, 50th and 75th percentile of the per-source values (linear interpolation), before any clamping.
-      days: days.map((d) => ({ ...d, range: rangeOf(d.providers), post: pc[d.day] ? { sig: pc[d.day].sig, slot: pc[d.day].slot, url: `https://explorer.solana.com/tx/${pc[d.day].sig}?cluster=devnet` } : null })),
+      // Range: Low and High = 25th and 75th percentile of the per-source values (linear interpolation, before clamping); Mid = the print.
+      days: days.map((d) => ({ ...d, range: rangeOf(d.providers, d.value), post: pc[d.day] ? { sig: pc[d.day].sig, slot: pc[d.day].slot, url: `https://explorer.solana.com/tx/${pc[d.day].sig}?cluster=devnet` } : null })),
       // Term deals: sourced long term contract prices only. None are recorded yet (index trades table is empty).
       termDeals: [] };
   },
