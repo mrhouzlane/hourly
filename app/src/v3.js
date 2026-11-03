@@ -354,104 +354,102 @@ const curMarket = () => S.markets.find((x) => x.id === S.t.seriesId) || null;
 function deskView() {
   deskInit();
   const code = S.mode === "lock" ? S.hedge.gpu : S.t.gpu;
-  return `<div class="pg trade"><h1>Trade the ${esc(gpuLabel(code))} hour.</h1>${exposureWindow()}${ticketWindow()}${positionsWindow()}</div>`;
+  return `<div class="pg trade"><h1>Trade the ${esc(gpuLabel(code))} hour.</h1><div class="tgrid">${exposureWindow()}${ticketWindow()}</div>${positionsWindow()}</div>`;
 }
 // ---------- my exposure: inputs stay in this page only (never stored, never sent) ----------
-const EXP = { gpus: "", ends: "", rate: "", floor: false, strike: null, capFor: null, cap: null };
+const EXP = { gpus: "", ends: "", rate: "", pick: "mid" };
+const RATE_PICKS = [["low", "Low"], ["mid", "Mid"], ["high", "High"]];
+function expRate() { if (EXP.pick === "custom") return Number(EXP.rate); const ix = expIndex(); return ix && ix.range ? Math.round(ix.range[EXP.pick] * 100) / 100 : 0; }
 const HOURS_MONTH = 730;
 function expIndex() {
   const d = IXP.H100; if (!d) loadPrints("H100");
   const days = (d && d.days) || [];
   return [...days].reverse().find((x) => x.value !== null) || null;
 }
-function expFloors() {
-  const puts = S.markets.filter((m) => m.door === "hedge" && m.status === "open" && m.underlying === "H100_SXM" && m.kind === "put" && m.model);
-  if (!puts.length) return { win: null, puts: [] };
-  const end = EXP.ends ? Date.parse(`${EXP.ends}T00:00:00Z`) : Date.now();
-  const wins = [...new Set(puts.map((m) => m.windowStart))];
-  const dist = (w) => { const m = puts.find((x) => x.windowStart === w); const a = Date.parse(`${m.windowStart}T00:00:00Z`), b = Date.parse(`${m.windowEnd}T23:59:59Z`); return end >= a && end <= b ? 0 : Math.min(Math.abs(end - a), Math.abs(end - b)); };
-  const win = wins.sort((x, y) => dist(x) - dist(y))[0];
-  return { win, puts: puts.filter((m) => m.windowStart === win).sort((x, y) => x.strike - y.strike) };
-}
 function exposureWindow() {
   return `<section class="win exp" id="exp"><div class="win-h"><span class="dots"><i></i><i></i><i></i></span>My exposure<span class="r"><span class="tag">Test money</span></span></div><div class="body">
     <div class="f3"><label class="fl"><span>GPUs</span><input id="x-gpus" inputmode="numeric" value="${esc(EXP.gpus)}"></label><div class="fl"><span>Chip</span><button class="chipb on" type="button">H100</button></div></div>
-    <div class="f2"><label class="fl"><span>Contract ends</span><input id="x-ends" type="date" value="${esc(EXP.ends)}"></label><label class="fl"><span>Your rate today</span><input id="x-rate" inputmode="decimal" placeholder="$ per GPU hour" value="${esc(EXP.rate)}"></label></div>
+    <label class="fl"><span>Contract ends</span><input id="x-ends" type="date" value="${esc(EXP.ends)}"></label>
+    <div class="fl"><span>Your rate today</span><div id="x-pick">${pickHtml()}</div></div>
     <div id="x-out">${expOut()}</div></div></section>`;
 }
-function expOut() {
-  const n = Math.floor(Number(EXP.gpus)), r = Number(EXP.rate), ix = expIndex();
-  if (!(n > 0) || !(r > 0) || !EXP.ends) return "";
-  const rent = n * r * HOURS_MONTH;
-  const link = ix ? `${esc(day(ix.day))} print ${usd(ix.value, 4)}, ${ix.post ? `<a href="${esc(ix.post.url)}" target="_blank" rel="noopener">posted on Solana, slot ${ix.post.slot}</a>` : "offchain"}` : "Loading the index.";
-  return `<div class="xr"><div class="xh"><i>Rent at risk from ${esc(day(EXP.ends))}</i><b>${usd(rent, 0)}<small> a month</small></b></div>
-    <div class="xl"><span>If H100 drops 10%</span><b>${usd(rent * 0.1, 0)} less a month</b></div>
-    <div class="xl"><span>If H100 drops 20%</span><b>${usd(rent * 0.2, 0)} less a month</b></div>
-    <p class="xi">Index used: H100 ${link}.</p></div>
-    ${EXP.floor ? floorHtml(n, r, ix) : '<button class="cta" id="x-floor">Floor these hours</button>'}`;
+function pickHtml() {
+  const ix = expIndex();
+  const opt = ([k, l]) => `<button type="button" data-rp="${k}" class="${EXP.pick === k ? "on" : ""}"><span>${l}</span><b>${ix && ix.range ? usd(ix.range[k]) : "--"}</b></button>`;
+  const when = ix && ix.computed_at ? new Date(ix.computed_at) : null;
+  const t = when ? `${when.getUTCDate()} ${when.toLocaleString("en-US", { month: "short", timeZone: "UTC" })} ${String(when.getUTCHours()).padStart(2, "0")}:${String(when.getUTCMinutes()).padStart(2, "0")} UTC` : "";
+  return `<div class="rp">${RATE_PICKS.map(opt).join("")}<button type="button" data-rp="custom" class="cust ${EXP.pick === "custom" ? "on" : ""}"><span>Custom</span><b>$</b></button></div>
+    ${EXP.pick === "custom" ? `<input id="x-rate" inputmode="decimal" placeholder="$ per GPU hour" value="${esc(EXP.rate)}">` : ""}
+    <p class="xi">${ix ? `Hourly Index ${usd(ix.value)}, print at ${t}, ${ix.post ? `<a href="${esc(ix.post.url)}" target="_blank" rel="noopener">onchain print</a>` : "not yet posted"}.` : "Loading the Hourly Index."}</p>`;
 }
-function floorHtml(n, r, ix) {
-  const { win, puts } = expFloors();
-  if (!win || !ix) return '<p class="st">No month is open to floor right now.</p>';
-  const target = ix.value * 0.9;
-  if (!puts.some((m) => m.id === EXP.strike)) EXP.strike = puts.reduce((p, m) => (Math.abs(m.strike - target) < Math.abs(p.strike - target) ? m : p)).id;
-  const m = puts.find((x) => x.id === EXP.strike);
-  if (EXP.capFor !== m.id) { EXP.capFor = m.id; EXP.cap = null; api(`capacity?series=${m.id}`).then((c) => { EXP.cap = c; const o = $("#x-out"); if (o) { o.innerHTML = expOut(); bindExpOut(); } }).catch(() => {}); }
-  const c = EXP.cap;
-  const backing = c ? (c.vault && c.vault.contracts > 0 ? c.vault.contracts : c.desk) : null;
-  const size = c ? Math.max(0, Math.min(n, c.maxPerTrade, backing)) : null;
-  const by = c ? (c.vault && c.vault.contracts > 0 ? "the weekly vault" : "the venue desk") : "";
-  const prem = size === null ? null : m.model.ask * feeMul() * size;
-  const pays = size === null ? null : m.maxPayoff * size;
-  const earns = size === null ? null : Math.max(0, size * HOURS_MONTH * Math.max(0, r - (ix.value - m.strike)) - prem);
-  const low = m.strike - m.cap;
-  return `<div class="xf"><div class="lab">Floor strike, 10% below the index</div><div class="ch c4">${puts.map((x) => `<button data-xk="${x.id}" class="${x.id === m.id ? "on" : ""}">$${x.strike.toFixed(2)}</button>`).join("")}</div>
-    <div class="lab">Expiry</div><span class="solo">${monthOf(m.windowStart)} average, ${day(m.windowStart)} to ${day(m.windowEnd)}</span>
-    <div class="lab">Size</div><span class="solo">${size === null ? "Checking capacity" : `${size} GPUs, ${(size * m.units).toLocaleString("en-US")} GPU hours`}</span>${size !== null && size < n ? `<p class="xi">Capped at ${size} of ${n} GPUs: ${size === c.maxPerTrade ? `${c.maxPerTrade} GPUs per trade` : `what ${by} can back`}.</p>` : ""}
-    <div class="pp"><div><i>Premium</i><b>${prem === null ? "--" : usd(prem)}</b></div><div><i>Pays up to</i><b>${pays === null ? "--" : usd(pays, 0)}</b></div></div>
-    <p class="xe">${earns === null ? "" : `Earns at least <b>${usd(earns, 0)} a month</b> on ${size} GPUs while H100 stays above ${usd(low)}.`}</p>
-    <p class="xi">Pays out on the third party index average for ${monthOf(m.windowStart)}, read by Switchboard. Backed by ${by || "the vault or the desk"}.</p>
-    <button class="cta" id="x-buy" ${size ? "" : "disabled"}>Buy floor</button><p class="st" id="x-st"></p></div>`;
+function expOut() {
+  const n = Math.floor(Number(EXP.gpus)), r = expRate(), ix = expIndex();
+  const ready = n > 0 && r > 0;
+  const rent = ready ? n * r * HOURS_MONTH : 0;
+  return `<div class="xr"><div class="xh"><i>Rent at risk this month</i><b>${ready ? usd(rent, 0) : "--"}</b></div>
+    <div class="xl"><span>If rent falls 10%</span><b>${ready ? `${usd(rent * 0.1, 0)} lost` : "--"}</b></div>
+    <div class="xl"><span>If rent falls 20%</span><b>${ready ? `${usd(rent * 0.2, 0)} lost` : "--"}</b></div></div>
+    <div class="xbtn"><button class="cta" id="x-floor" ${ready && ix ? "" : "disabled"}>Floor these hours</button><a href="#" id="x-hand">Request a quote by hand</a></div>
+    <p class="st" id="x-st"></p>`;
+}
+function expChanged() { const o = $("#x-out"); if (o) { o.innerHTML = expOut(); bindExpOut(); } if (S.hedge.linked && S.mode === "lock") linkFloor(false); }
+function bindPick() {
+  $$("[data-rp]").forEach((b) => b.addEventListener("click", () => { EXP.pick = b.dataset.rp; $("#x-pick").innerHTML = pickHtml(); bindPick(); if (EXP.pick === "custom") { const i = $("#x-rate"); if (i) i.focus(); } expChanged(); }));
+  const i = $("#x-rate"); if (i) i.addEventListener("input", () => { EXP.rate = i.value; expChanged(); });
 }
 function bindExposure() {
-  const set = (id, k) => { const el = $(id); if (el) el.addEventListener("input", () => { EXP[k] = el.value; const o = $("#x-out"); o.innerHTML = expOut(); bindExpOut(); }); };
-  set("#x-gpus", "gpus"); set("#x-ends", "ends"); set("#x-rate", "rate");
-  bindExpOut();
+  const set = (id, k) => { const el = $(id); if (el) el.addEventListener("input", () => { EXP[k] = el.value; expChanged(); }); };
+  set("#x-gpus", "gpus"); set("#x-ends", "ends");
+  bindPick(); bindExpOut();
 }
 function bindExpOut() {
-  const f = $("#x-floor"); if (f) f.addEventListener("click", () => { EXP.floor = true; $("#x-out").innerHTML = expOut(); bindExpOut(); });
-  $$("[data-xk]").forEach((b) => b.addEventListener("click", () => { EXP.strike = b.dataset.xk; $("#x-out").innerHTML = expOut(); bindExpOut(); }));
-  const buy = $("#x-buy"); if (buy) buy.addEventListener("click", () => ensureWallet(expBuy));
+  const f = $("#x-floor"); if (f) f.addEventListener("click", () => linkFloor(true));
+  const h = $("#x-hand"); if (h) h.addEventListener("click", (e) => { e.preventDefault(); handQuote(); });
 }
-// same quote, confirm and sign flow as Lock a month, for the chosen floor and size
-async function expBuy() {
-  const m = S.markets.find((x) => x.id === EXP.strike), c = EXP.cap, n = Math.floor(Number(EXP.gpus));
-  if (!m || !c) return;
-  const size = Math.max(0, Math.min(n, c.maxPerTrade, c.vault && c.vault.contracts > 0 ? c.vault.contracts : c.desk));
-  const st = $("#x-st");
-  try {
-    st.textContent = "Getting a firm price.";
-    const q = await api("quote", { owner: S.wallet.address, ref: refFor(), legs: [{ series: m.id, side: "buy", qty: size }] });
-    st.textContent = "";
-    dialog(`<div class="icon">?</div><b>Confirm</b>
-      <div class="lines"><div><span>Floor ${esc(m.gpu)} ${monthOf(m.windowStart)} at $${m.strike.toFixed(2)}, ${size} GPUs</span></div>
-        ${q.fee ? `<div><span>Fee</span><span>${usd(q.fee)}</span></div>` : ""}
-        <div class="big2"><span>Premium</span><span>${usd(q.pay + (q.fee || 0))}</span></div>
-        <div><span>Pays up to</span><span>${usd(m.maxPayoff * size, 0)}</span></div></div>
-      <div class="actions"><button class="btn" data-close>Cancel</button><button class="btn default" id="ok">Sign with wallet</button></div>`,
-    (dm, close) => $("#ok", dm).addEventListener("click", async () => {
-      close();
-      try {
-        const r = await signAndSubmit(q);
-        alertBox("✓", "Bought.", `Floor on ${size} H100 GPUs for ${monthOf(m.windowStart)} at $${m.strike.toFixed(2)}. Premium ${usd(q.pay + (q.fee || 0))}, pays up to ${usd(m.maxPayoff * size, 0)}. It's in your positions.`, r.url);
-        EXP.capFor = null;
-        await Promise.all([refreshMarkets(), refreshPortfolio(), refreshActivity()]); refreshSoon(); render();
-      } catch (e) { alertBox("!", "Not sent.", esc(e.message)); }
-    }));
-  } catch (e) {
-    if (/faucet/i.test(e.message) && S.wallet.kind === "burner" && !expBuy._funded) { expBuy._funded = true; await autoFund(); return expBuy(); }
-    st.textContent = e.message;
-  }
+// Fill the ticket from My exposure: Lock a month, Floor, strike = index minus 10%,
+// expiry nearest the contract end, size = GPUs capped by what the House can back.
+// While linked, every exposure edit re-runs this; a hand edit on the ticket unlinks it.
+const CAPC = {};
+function floorPick() {
+  const ix = expIndex(), n = Math.floor(Number(EXP.gpus));
+  const puts = S.markets.filter((m) => m.door === "hedge" && m.status === "open" && m.underlying === "H100_SXM" && m.kind === "put" && m.model);
+  if (!ix || !puts.length || !(n > 0)) return null;
+  const end = EXP.ends ? Date.parse(`${EXP.ends}T00:00:00Z`) : Date.now();
+  const gap = (m) => { const a = Date.parse(`${m.windowStart}T00:00:00Z`), b = Date.parse(`${m.windowEnd}T23:59:59Z`); return end >= a && end <= b ? 0 : Math.min(Math.abs(end - a), Math.abs(end - b)); };
+  const win = puts.slice().sort((x, y) => gap(x) - gap(y))[0].windowStart;
+  const target = Math.round(ix.value * 0.9 * 100) / 100;
+  const m = puts.filter((x) => x.windowStart === win).reduce((p, x) => (Math.abs(x.strike - target) < Math.abs(p.strike - target) ? x : p));
+  return { m, win, target, n };
+}
+function capFor(c) { return c ? Math.min(c.maxPerTrade, c.vault && c.vault.contracts > 0 ? c.vault.contracts : c.desk) : 50; }
+async function linkFloor(flash) {
+  const st = $("#x-st"), pk = floorPick();
+  if (!pk) { if (flash && st) st.textContent = "No month is open to floor right now."; return; }
+  const { m, win, target, n } = pk;
+  const apply = () => {
+    const qty = Math.max(1, Math.min(n, capFor(CAPC[m.id])));
+    Object.assign(S.hedge, { gpu: "H100_SXM", role: "own", win, sid: m.id, qty, target, asked: n, linked: true, edited: false });
+    S.mode = "lock"; S.t.quote = null;
+    renderTicket();
+  };
+  apply(); // instant, with the cached House size (or the 50 per trade limit)
+  if (!(m.id in CAPC)) { try { CAPC[m.id] = await api(`capacity?series=${m.id}`); } catch (_) { CAPC[m.id] = null; } if (S.hedge.linked && S.hedge.sid === m.id) apply(); }
+  if (st) st.textContent = "";
+  if (!flash) return;
+  const tk = $("#ticket"); if (tk) { tk.classList.remove("flash"); void tk.offsetWidth; tk.classList.add("flash"); if (innerWidth < 760) tk.scrollIntoView({ behavior: "smooth" }); }
+}
+function unlink() { if (S.hedge.linked) { S.hedge.linked = false; S.hedge.edited = true; } S.hedge.target = null; S.hedge.asked = null; }
+const HAND_KEY = "hourly.handquotes";
+function handQuote() {
+  dialog(`<div class="icon">✎</div><b>Request a quote by hand</b><p class="small">Saved on this device only. Nothing is sent.</p>
+    <div class="hq"><label>Owner<input id="hq-owner" autocomplete="organization"></label><label>Open hours<input id="hq-hours" inputmode="numeric" value="${Math.floor(Number(EXP.gpus)) > 0 ? Math.floor(Number(EXP.gpus)) * HOURS_MONTH : ""}"></label><label>Window<input id="hq-window" placeholder="Dec 1 to Dec 31"></label><label>Rate, $ per GPU hour<input id="hq-rate" inputmode="decimal" value="${expRate() > 0 ? expRate().toFixed(2) : ""}"></label></div>
+    <div class="actions"><button class="btn" data-close>Cancel</button><button class="btn default" id="hq-save">Save</button></div>`,
+  (m, close) => $("#hq-save", m).addEventListener("click", () => {
+    let list = []; try { list = JSON.parse(store.get(HAND_KEY) || "[]"); } catch (_) { list = []; }
+    list.push({ at: new Date().toISOString(), owner: $("#hq-owner", m).value, hours: $("#hq-hours", m).value, window: $("#hq-window", m).value, rate: $("#hq-rate", m).value });
+    store.set(HAND_KEY, JSON.stringify(list.slice(-50)));
+    close(); alertBox("✓", "Saved.", `Quote request saved on this device (${list.length} saved).`);
+  }));
 }
 function chipRow(codes, cur, attr) {
   return `<div class="lab">Chip</div><div>${codes.map((c) => `<button class="chipb ${c === cur ? "on" : ""}" ${attr}="${c}">${esc(gpuLabel(c))}</button>`).join("")}</div>`;
@@ -504,21 +502,34 @@ function firmHtml() {
     <button class="cta white" id="t-sign">Sign with wallet</button><button class="cta line" id="t-back">Change</button>
     <p class="st" id="t-st"></p>`;
 }
-function lockHtml() {
+function lockMarkets() {
   const h = S.hedge, codes = GPU_ORDER.filter((c) => hedgePair(c));
-  const side = h.role === "own" ? "lower" : "higher";
-  if (!codes.length) return `${chipRow([h.gpu], h.gpu, "data-hg")}${sideRow(side, "data-hrole")}<p class="st">No month is open to lock right now.</p>`;
+  if (!codes.length) return null;
   if (!codes.includes(h.gpu)) h.gpu = codes[0];
   const wins = hedgeWindows(h.gpu); if (!wins.includes(h.win)) h.win = wins[0];
-  const { put, call } = hedgePair(h.gpu, h.win), own = h.role === "own", qn = h.qty || 1;
-  const price = (own ? put.model.ask : call.model.ask) * feeMul();
-  const k = own ? put.strike : call.strike, maxPay = own ? put.maxPayoff : call.maxPayoff;
+  const kind = h.role === "own" ? "put" : "call";
+  const list = S.markets.filter((m) => m.door === "hedge" && m.status === "open" && m.underlying === h.gpu && m.model && m.windowStart === h.win && m.kind === kind).sort((a, b) => a.strike - b.strike);
+  let m = list.find((x) => x.id === h.sid);
+  if (!m) { m = list[kind === "put" ? list.length - 1 : 0]; h.sid = m && m.id; }
+  return { codes, list, m };
+}
+function lockHtml() {
+  const h = S.hedge, side = h.role === "own" ? "lower" : "higher";
+  const lm = lockMarkets();
+  if (!lm || !lm.m) return `${chipRow([h.gpu], h.gpu, "data-hg")}${sideRow(side, "data-hrole")}<p class="st">No month is open to lock right now.</p>`;
+  const { codes, list, m } = lm, own = h.role === "own", qn = h.qty || 1;
+  const price = m.model.ask * feeMul(), prem = price * qn;
+  const earns = own ? m.strike - price / m.units : null;
+  const note = own && h.target && Math.abs(h.target - m.strike) > 0.001 ? `<p class="xi">Target $${h.target.toFixed(2)}, nearest listed strike $${m.strike.toFixed(2)}.</p>` : "";
+  const capNote = h.asked && h.asked > qn ? `<p class="xi">${qn} of ${h.asked} GPUs, capped by what the House can back per trade.</p>` : "";
   return `${chipRow(codes, h.gpu, "data-hg")}${sideRow(side, "data-hrole")}
-    <div class="lab">Strike</div><span class="solo">$${k.toFixed(2)} /hr</span>
-    <div class="lab">Date</div><span class="solo">${day(put.windowStart)} to ${day(put.windowEnd)}</span>
-    <div class="lab">Amount</div><span class="solo">${qn} GPU, ${put.units} hours</span>
-    <div class="pp"><div><i>Premium</i><b>${usd(price * qn)}</b></div><div><i>Pays up to</i><b>${usd(maxPay * qn)}</b></div></div>
-    <button class="cta" id="hedge-go">Lock ${monthOf(put.windowStart)}</button>
+    <div class="lab">Strike</div><div class="ch c4 strk">${list.map((x) => `<button data-hs="${x.id}" class="${x.id === m.id ? "on" : ""}">$${x.strike.toFixed(2)}</button>`).join("")}</div>${note}
+    <div class="lab">Date</div><span class="solo">${day(m.windowStart)} to ${day(m.windowEnd)}</span>
+    <div class="lab">Amount</div><span class="solo">${qn} GPU${qn > 1 ? "s" : ""}, ${(qn * m.units).toLocaleString("en-US")} hours</span>${capNote}
+    ${h.linked ? `<p class="lnk">Covering ${qn} GPU${qn > 1 ? "s" : ""} × ${m.units} h from My exposure</p>` : h.edited ? `<p class="lnk">Edited by hand <button class="mini" id="relink">Relink</button></p>` : ""}
+    <div class="pp"><div><i>Premium</i><b>${usd(prem)}</b></div><div><i>Pays up to</i><b>${usd(m.maxPayoff * qn, 0)}</b></div></div>
+    ${own ? `<p class="xe">Earns at least <b>${usd(earns)} per GPU hour</b>: strike minus Premium per hour.</p>` : ""}
+    <button class="cta" id="hedge-go">Lock ${monthOf(m.windowStart)}</button>
     <p class="st" id="h-st"></p>`;
 }
 function positionsWindow() {
@@ -552,7 +563,7 @@ function actions(r) {
 function renderTicket() { const el = $("#ticket"); if (el) { el.outerHTML = ticketWindow(); bindTicket(); } }
 function bindTicket() {
   const reset = () => { S.t.quote = null; S.t.qerr = null; };
-  $$("[data-mode]").forEach((b) => b.addEventListener("click", () => { S.mode = b.dataset.mode; reset(); render(); }));
+  $$("[data-mode]").forEach((b) => b.addEventListener("click", () => { if (b.dataset.mode !== S.mode) unlink(); S.mode = b.dataset.mode; reset(); render(); }));
   $$("#ticket [data-gpu]").forEach((b) => b.addEventListener("click", () => { S.t.gpu = b.dataset.gpu; S.t.strike = null; S.t.seriesId = null; reset(); render(); }));
   $$("[data-side]").forEach((b) => b.addEventListener("click", () => { S.t.side = b.dataset.side; reset(); renderTicket(); }));
   $$("[data-k]").forEach((b) => b.addEventListener("click", () => { S.t.strike = Number(b.dataset.k); S.t.seriesId = null; reset(); deskInit(); renderTicket(); }));
@@ -581,8 +592,10 @@ function bindTicket() {
   }));
   const sign = $("#t-sign"); if (sign) sign.addEventListener("click", deskSign);
   const back = $("#t-back"); if (back) back.addEventListener("click", () => { S.t.quote = null; renderTicket(); });
-  $$("[data-hrole]").forEach((b) => b.addEventListener("click", () => { S.hedge.role = b.dataset.hrole === "lower" ? "own" : "rent"; renderTicket(); }));
-  $$("[data-hg]").forEach((b) => b.addEventListener("click", () => { S.hedge.gpu = b.dataset.hg; S.hedge.qty = 1; render(); }));
+  $$("[data-hrole]").forEach((b) => b.addEventListener("click", () => { S.hedge.role = b.dataset.hrole === "lower" ? "own" : "rent"; S.hedge.sid = null; unlink(); renderTicket(); }));
+  $$("[data-hs]").forEach((b) => b.addEventListener("click", () => { S.hedge.sid = b.dataset.hs; unlink(); renderTicket(); }));
+  $$("[data-hg]").forEach((b) => b.addEventListener("click", () => { S.hedge.gpu = b.dataset.hg; S.hedge.qty = 1; unlink(); render(); }));
+  const rl = $("#relink"); if (rl) rl.addEventListener("click", () => linkFloor(true));
   const hg = $("#hedge-go"); if (hg) hg.addEventListener("click", () => ensureWallet(lockQuote));
 }
 // unchanged from mac.js deskQuote / deskSign
@@ -616,25 +629,25 @@ async function deskSign() {
     render();
   } catch (e) { t.qerr = e.message || "The wallet declined."; t.quote = null; renderTicket(); }
 }
-// unchanged from mac.js bindHedge quote and sign flow
+// same quote and sign flow as mac.js bindHedge, on the chosen strike and size
 async function lockQuote() {
-  const { put, call } = hedgePair(S.hedge.gpu, S.hedge.win);
-  const own = S.hedge.role === "own";
-  const legs = own ? [{ series: put.id, side: "buy", qty: S.hedge.qty || 1 }] : [{ series: call.id, side: "buy", qty: S.hedge.qty || 1 }];
+  const lm = lockMarkets(); if (!lm || !lm.m) return;
+  const m = lm.m, qty = S.hedge.qty || 1, own = S.hedge.role === "own";
   const st = $("#h-st"), gb = $("#hedge-go");
   try {
     st.textContent = "Getting a firm price.";
-    const q = await api("quote", { owner: S.wallet.address, ref: refFor(), legs });
+    const q = await api("quote", { owner: S.wallet.address, ref: refFor(), legs: [{ series: m.id, side: "buy", qty }] });
     dialog(`<div class="icon">?</div><b>Confirm</b>
       <div class="lines">
-        ${q.legs.map((l) => `<div><span>${l.side === "buy" ? "Buy" : "Sell"} ${esc(l.title.split(" (")[0])}</span><span>${usd(l.price)}</span></div>`).join("")}
+        <div><span>${own ? "Floor" : "Cap"} ${esc(m.gpu)} ${monthOf(m.windowStart)} at $${m.strike.toFixed(2)}, ${qty} GPU${qty > 1 ? "s" : ""}</span></div>
         ${q.fee ? `<div><span>Fee</span><span>${usd(q.fee)}</span></div>` : ""}
         <div class="big2"><span>Premium</span><span>${usd(q.pay + (q.fee || 0) - (q.receive || 0))}</span></div>
+        <div><span>Pays up to</span><span>${usd(m.maxPayoff * qty, 0)}</span></div>
       </div>
       <div class="actions"><button class="btn" data-close>Cancel</button><button class="btn default" id="ok">Sign with wallet</button></div>`,
-    (m, close) => $("#ok", m).addEventListener("click", async () => {
+    (dm, close) => $("#ok", dm).addEventListener("click", async () => {
       close();
-      try { const r = await signAndSubmit(q); alertBox("✓", "Locked.", `${esc(put.gpu)} ${monthOf(put.windowStart)} is in your positions.`, r.url); await Promise.all([refreshMarkets(), refreshPortfolio(), refreshActivity()]); refreshSoon(); render(); }
+      try { const r = await signAndSubmit(q); alertBox("✓", "Bought.", `${own ? "Floor" : "Cap"} on ${qty} ${esc(m.gpu)} GPU${qty > 1 ? "s" : ""} for ${monthOf(m.windowStart)} at $${m.strike.toFixed(2)}. Premium ${usd(q.pay + (q.fee || 0))}, pays up to ${usd(m.maxPayoff * qty, 0)}. It's in your positions.`, r.url); await Promise.all([refreshMarkets(), refreshPortfolio(), refreshActivity()]); refreshSoon(); render(); }
       catch (e) { alertBox("!", "Not sent.", esc(e.message)); }
     }));
     st.textContent = "";
@@ -672,7 +685,7 @@ async function loadPrints(label) {
   IXP[label] = { loading: true };
   try { IXP[label] = await api(`index/prints?gpu=${encodeURIComponent(label)}`); } catch (e) { IXP[label] = { error: e.message }; }
   if (S.view === "index") render();
-  else if (S.view === "desk") { const o = $("#x-out"); if (o) { o.innerHTML = expOut(); bindExpOut(); } }
+  else if (S.view === "desk") { const pk = $("#x-pick"); if (pk) { pk.innerHTML = pickHtml(); bindPick(); } const o = $("#x-out"); if (o) { o.innerHTML = expOut(); bindExpOut(); } }
 }
 const utcTime = (iso) => (iso ? `${iso.slice(11, 16)} UTC` : "");
 const shortKey = (k) => (k ? `${k.slice(0, 4)}…${k.slice(-4)}` : "");
@@ -690,31 +703,63 @@ function sourcesHtml(d, data) {
     <p><b>Publisher key.</b> ${data.publisher ? `<a href="${exAddr(data.publisher)}" target="_blank" rel="noopener" class="mono">${esc(data.publisher)}</a>` : "none"}. The sources are offchain; the posted print is onchain.</p>
   </div>`;
 }
+const rangeTxt = (r) => (r ? `${usd(r.low)} to ${usd(r.high)}, mid ${usd(r.mid)}, ${r.n} sources` : "no print");
+const lastRanged = (days) => [...(days || [])].reverse().find((x) => x.value !== null && x.range) || null;
+// Band chart: shaded 25th to 75th percentile, a line for the median. Missing days break the band.
+function rangeChart(days, { W = 1150, H = 330, R = 74, B = 30, T = 22, L = 10, axis = true } = {}) {
+  if (!days || days.length < 2) return "";
+  const pts = days.map((d) => (d.value !== null && d.range ? d.range : null));
+  const ok = pts.filter(Boolean); if (ok.length < 2) return "";
+  let lo = Math.min(...ok.map((r) => r.low)), hi = Math.max(...ok.map((r) => r.high));
+  const pad = (hi - lo || hi * 0.05) * 0.08; lo -= pad; hi += pad;
+  const X = (i) => L + (i / (days.length - 1)) * (W - L - R), Y = (y) => T + (1 - (y - lo) / (hi - lo)) * (H - T - B);
+  const segs = []; let cur = [];
+  pts.forEach((r, i) => { if (r) cur.push([i, r]); else if (cur.length) { segs.push(cur); cur = []; } });
+  if (cur.length) segs.push(cur);
+  const lone = segs.filter((sg) => sg.length === 1).map(([[i, r]]) => `<line x1="${X(i).toFixed(1)}" x2="${X(i).toFixed(1)}" y1="${Y(r.high).toFixed(1)}" y2="${Y(r.low).toFixed(1)}" stroke="rgba(255,255,255,.35)" stroke-width="${axis ? 6 : 3}" ${axis ? "" : 'vector-effect="non-scaling-stroke"'}/>`).join("");
+  const band = segs.filter((sg) => sg.length > 1).map((sg) => `M${sg.map(([i, r]) => `${X(i).toFixed(1)},${Y(r.high).toFixed(1)}`).join(" L")} L${sg.slice().reverse().map(([i, r]) => `${X(i).toFixed(1)},${Y(r.low).toFixed(1)}`).join(" L")} Z`).join(" ");
+  const mid = segs.map((sg) => `M${sg.map(([i, r]) => `${X(i).toFixed(1)},${Y(r.mid).toFixed(1)}`).join(" L")}`).join(" ");
+  let grid = "", xl = "";
+  if (axis) {
+    for (let i = 0; i < 5; i++) { const y = hi - ((hi - lo) * i) / 4, yy = Y(y); grid += `<line x1="${L}" x2="${W - R}" y1="${yy.toFixed(1)}" y2="${yy.toFixed(1)}" stroke="rgba(255,255,255,.16)"/><text x="${W - R + 10}" y="${(yy + 4).toFixed(1)}">${usd(y)}</text>`; }
+    xl = [0, Math.floor((days.length - 1) / 2), days.length - 1].map((i, k) => `<text x="${X(i).toFixed(1)}" y="${H - 6}" text-anchor="${k === 0 ? "start" : k === 2 ? "end" : "middle"}">${day(days[i].day)}</text>`).join("");
+  }
+  const li = pts.map((r, i) => (r ? i : -1)).filter((i) => i >= 0).pop();
+  return `<svg class="axis" viewBox="0 0 ${W} ${H}" ${axis ? "" : 'preserveAspectRatio="none"'} role="img" aria-label="Daily range, low to high, with the mid">${grid}
+    <path d="${band}" fill="rgba(255,255,255,.18)"/>${lone}
+    <path d="${mid}" fill="none" stroke="#fff" stroke-width="${axis ? 2 : 1.6}" stroke-linejoin="round" ${axis ? "" : 'vector-effect="non-scaling-stroke"'}/>
+    ${axis ? `<circle cx="${X(li).toFixed(1)}" cy="${Y(pts[li].mid).toFixed(1)}" r="5" fill="#fff"/>` : ""}${xl}</svg>`;
+}
 function indexView() {
-  const g = S.index.find((x) => x.code === S.ixChip) || chips()[0];
+  const cs = chips();
+  const g = S.index.find((x) => x.code === S.ixChip) || cs[0];
   if (!g) return '<div class="pg"><h1>Hourly Index</h1></div>';
-  const data = IXP[g.label];
-  if (!data) loadPrints(g.label);
-  const days = (data && data.days) || [];
-  const last = [...days].reverse().find((x) => x.value !== null);
-  const seg = `<span class="seg">${chips().map((c) => `<button data-ix="${c.code}" class="${c.code === g.code ? "on" : ""}">${esc(c.label)}</button>`).join("")}</span>`;
-  const big = last ? `<section class="win ixbig"><div class="bh">${seg}</div>
-      <button class="num" id="ix-open" aria-expanded="${S.ixOpen ? "true" : "false"}">${usd(last.value, 4)}<small>/hr</small></button>
-      <p class="when">${esc(g.label)} print for ${day(last.day)}, computed ${day(last.computed_at.slice(0, 10))} ${utcTime(last.computed_at)}. ${last.n_providers} sources.</p>
-      <p class="onc">${onchainLink(last)}</p>
-      <p class="hint">${S.ixOpen ? "Where this number comes from:" : "Click the number to see where it comes from."}</p>
+  cs.forEach((c) => { if (!IXP[c.label]) loadPrints(c.label); });
+  const data = IXP[g.label], days = (data && data.days) || [];
+  const last = lastRanged(days);
+  const panel = `<div class="ixg">${cs.map((c) => { const d = IXP[c.label], l = d && lastRanged(d.days);
+    return `<button class="ixc ${c.code === g.code ? "on" : ""}" data-ix="${c.code}"><div class="h"><b>${esc(c.label)}</b><span>${l ? usd(l.range.mid) : "--"}<small>mid</small></span></div>
+      ${d && d.days ? rangeChart(d.days.slice(-90), { W: 250, H: 62, R: 2, B: 3, T: 3, L: 2, axis: false }) : '<svg viewBox="0 0 250 62"></svg>'}
+      <div class="c">${l ? `${usd(l.range.low)} to ${usd(l.range.high)}, ${l.range.n} sources` : d && d.error ? esc(d.error) : "Loading."}</div></button>`; }).join("")}</div>
+    <div class="ixg deals">${cs.map((c) => { const d = IXP[c.label], td = (d && d.termDeals) || [];
+      return `<div class="ixc"><div class="h"><b>${esc(c.label)}</b><i>Term deals</i></div><div class="c">${td.length ? td.map((x) => `${usd(x.usd_hr)} for ${esc(x.term)}, <a href="${esc(x.source_url)}" target="_blank" rel="noopener">source</a>`).join("<br>") : "No deals yet"}</div></div>`; }).join("")}</div>`;
+  const seg = `<span class="seg">${cs.map((c) => `<button data-ix="${c.code}" class="${c.code === g.code ? "on" : ""}">${esc(c.label)}</button>`).join("")}</span>`;
+  const rg = S.ixRange === "all" ? days : days.slice(-Number(S.ixRange));
+  const big = last ? `<section class="win ixbig"><div class="bh">${seg}<span class="seg">${[["30", "30d"], ["90", "90d"], ["all", "All"]].map(([k, l]) => `<button data-ixr="${k}" class="${S.ixRange === k ? "on" : ""}">${l}</button>`).join("")}</span></div>
+      <button class="num rng" id="ix-open" aria-expanded="${S.ixOpen ? "true" : "false"}"><b>${esc(g.label)}</b> ${usd(last.range.low)} to ${usd(last.range.high)}<small>mid ${usd(last.range.mid)}, ${last.range.n} sources</small></button>
+      <p class="when">Print for ${day(last.day)}, computed ${day(last.computed_at.slice(0, 10))} ${utcTime(last.computed_at)}. Low and High are the 25th and 75th percentile of the sources, Mid the median. ${onchainLink(last)}</p>
+      ${rangeChart(rg, innerWidth < 760 ? { W: 560, H: 300, R: 58 } : {})}
+      <p class="hint">${S.ixOpen ? "Where this range comes from:" : "Click the range to see each source."}</p>
       ${S.ixOpen ? sourcesHtml(last, data) : ""}</section>` : `<section class="win ixbig"><div class="bh">${seg}</div><p class="when">${data && data.error ? esc(data.error) : "Loading prints."}</p></section>`;
-  const recent = days.slice(-30).reverse().map((d) => d.value === null
-    ? `<tr class="gap"><td>${day(d.day)}</td><td colspan="3">no print</td></tr>`
-    : `<tr><td>${day(d.day)}</td><td class="r">${usd(d.value, 4)}</td><td class="r">${d.n_providers}</td><td>${onchainLink(d)}</td></tr>`).join("");
-  const hist = g.history || [], h = S.ixRange === "all" ? hist : hist.slice(-Number(S.ixRange));
+  const recent = days.slice(-30).reverse().map((d) => (d.value === null || !d.range)
+    ? `<tr class="gap"><td>${day(d.day)}</td><td colspan="5">no print</td></tr>`
+    : `<tr><td>${day(d.day)}</td><td class="r">${usd(d.range.low)}</td><td class="r">${usd(d.range.mid)}</td><td class="r">${usd(d.range.high)}</td><td class="r">${d.range.n}</td><td>${d.post ? `<a href="${esc(d.post.url)}" target="_blank" rel="noopener">slot ${d.post.slot}</a>` : '<span class="tag ghost">offchain</span>'}</td></tr>`).join("");
   return `<div class="pg">
     <h1>Hourly Index</h1>
-    <p class="sub">USD per GPU hour. One print a day per chip.</p>
+    <p class="sub">USD per GPU hour, as a range across sources. One print a day per chip.</p>
+    ${panel}
     ${big}
-    ${win("Recent prints", `<table class="tb"><tr><th>Day</th><th class="r">Price per GPU hour</th><th class="r">Sources</th><th>Onchain</th></tr>${recent}</table>`, "Daily, gaps shown", "big")}
-    <section class="win big"><div class="bh"><span class="px">${esc(g.label)} ${usd(g.last)}</span><span class="seg">${[["30", "30d"], ["90", "90d"], ["all", "All"]].map(([k, l]) => `<button data-ixr="${k}" class="${S.ixRange === k ? "on" : ""}">${l}</button>`).join("")}</span></div>
-      ${areaChart(h)}</section>
+    ${win(`Recent prints, ${esc(g.label)}`, `<table class="tb"><tr><th>Day</th><th class="r">Low</th><th class="r">Mid</th><th class="r">High</th><th class="r">Sources</th><th>Onchain</th></tr>${recent}</table>`, "Daily, gaps shown", "big")}
   </div>`;
 }
 function bindIndex() {
