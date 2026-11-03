@@ -433,7 +433,7 @@ function positionsWindow() {
       const name = pred ? `${r.gpu} ${r.long && r.short ? "floor and cap" : r.short ? "floor" : "cap"} $${r.strike.toFixed(2)}` : `${r.gpu} ${monthOf(r.windowStart)} ${r.kind === "put" ? "floor" : "cap"} $${r.strike.toFixed(2)}`;
       const when = pred ? day(r.windowEnd) : monthOf(r.windowStart);
       const value = r.status === "settled" ? `paid out at $${r.settled.price.toFixed(4)}` : usd((r.markPerContract ?? 0) * (r.long - r.short));
-      return `<tr><td>${esc(name)}<div class="muted">${when} · ${r.status === "open" ? `closes in ${countdown(r.tradingEnd)}` : esc(r.status)}</div></td><td>${r.long ? `long ${r.long}` : ""} ${r.short ? `short ${r.short}` : ""}</td><td class="r">${value}</td><td class="r">${actions(r)}</td></tr>`;
+      return `<tr><td>${esc(name)}<div class="muted">${when} · ${r.status === "open" ? `closes in ${countdown(r.tradingEnd)}` : r.status === "settled" ? "paid out" : esc(r.status)}</div></td><td>${r.long ? `long ${r.long}` : ""} ${r.short ? `short ${r.short}` : ""}</td><td class="r">${value}</td><td class="r">${actions(r)}</td></tr>`;
     }).join("");
     const vrows = (p.vaults || []).map((v) => `<tr><td>Weekly vault, epoch ${v.epoch}<div class="muted">${esc(v.phase)}</div></td><td>${pct(v.share)}</td><td class="r">${usd(v.cashValue)}</td><td class="r">${v.phase === "withdrawable" ? `<button class="mini" data-vw="${v.epoch}">Withdraw</button>` : ""}</td></tr>`).join("");
     body = rows || vrows ? `<table class="tb"><tr><th>Position</th><th>Side</th><th class="r">Value</th><th></th></tr>${rows}${vrows}</table>` : '<p class="empty">Nothing yet. Your first ticket shows up here.</p>';
