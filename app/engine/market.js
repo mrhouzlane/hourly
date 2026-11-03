@@ -398,4 +398,24 @@ async function portfolio(owner) {
   return { owner: user.toBase58(), usdc: Number(bals[quoteMint] || 0n) / USD, rows, vaults };
 }
 
-module.exports = { listSeries, markets, quote, action, vaultAction, vaultPhase, portfolio, price, calibration };
+// Read only: how many contracts a buy on this market can take right now (trade limit, vault room, desk room).
+async function capacity(seriesId) {
+  const list = await listSeries();
+  const s = list.find((x) => x.pubkey.toBase58() === seriesId);
+  if (!s) throw venue.httpError(404, "unknown market");
+  const lim = LIMITS[s.meta.door], nowS = Math.floor(Date.now() / 1000);
+  const per = BigInt(s.cap) * BigInt(s.units);
+  let vault = null;
+  const v = tradingVaultFor(s, nowS);
+  if (v) {
+    const room = await vaultRoom(v, s);
+    if (room) {
+      const byCap = room.capAtoms > room.short * per ? (room.capAtoms - room.short * per) / per : 0n;
+      vault = { epoch: v.epoch, contracts: Number(byCap < room.cash / per ? byCap : room.cash / per) };
+    }
+  }
+  const makerPos = (await venue.positions(venue.keys.maker.publicKey, [s.pubkey]))[s.pubkey.toBase58()] || 0n;
+  const desk = Math.max(0, lim.makerMaxShort - Number(makerPos));
+  return { maxPerTrade: lim.maxQty, vault, desk, contractUsd: Number(per) / USD };
+}
+module.exports = { listSeries, markets, quote, action, vaultAction, vaultPhase, portfolio, price, calibration, capacity };

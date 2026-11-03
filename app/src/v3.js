@@ -354,7 +354,104 @@ const curMarket = () => S.markets.find((x) => x.id === S.t.seriesId) || null;
 function deskView() {
   deskInit();
   const code = S.mode === "lock" ? S.hedge.gpu : S.t.gpu;
-  return `<div class="pg trade"><h1>Trade the ${esc(gpuLabel(code))} hour.</h1>${ticketWindow()}${positionsWindow()}</div>`;
+  return `<div class="pg trade"><h1>Trade the ${esc(gpuLabel(code))} hour.</h1>${exposureWindow()}${ticketWindow()}${positionsWindow()}</div>`;
+}
+// ---------- my exposure: inputs stay in this page only (never stored, never sent) ----------
+const EXP = { gpus: "", ends: "", rate: "", floor: false, strike: null, capFor: null, cap: null };
+const HOURS_MONTH = 730;
+function expIndex() {
+  const d = IXP.H100; if (!d) loadPrints("H100");
+  const days = (d && d.days) || [];
+  return [...days].reverse().find((x) => x.value !== null) || null;
+}
+function expFloors() {
+  const puts = S.markets.filter((m) => m.door === "hedge" && m.status === "open" && m.underlying === "H100_SXM" && m.kind === "put" && m.model);
+  if (!puts.length) return { win: null, puts: [] };
+  const end = EXP.ends ? Date.parse(`${EXP.ends}T00:00:00Z`) : Date.now();
+  const wins = [...new Set(puts.map((m) => m.windowStart))];
+  const dist = (w) => { const m = puts.find((x) => x.windowStart === w); const a = Date.parse(`${m.windowStart}T00:00:00Z`), b = Date.parse(`${m.windowEnd}T23:59:59Z`); return end >= a && end <= b ? 0 : Math.min(Math.abs(end - a), Math.abs(end - b)); };
+  const win = wins.sort((x, y) => dist(x) - dist(y))[0];
+  return { win, puts: puts.filter((m) => m.windowStart === win).sort((x, y) => x.strike - y.strike) };
+}
+function exposureWindow() {
+  return `<section class="win exp" id="exp"><div class="win-h"><span class="dots"><i></i><i></i><i></i></span>My exposure<span class="r"><span class="tag">Test money</span></span></div><div class="body">
+    <div class="f3"><label class="fl"><span>GPUs</span><input id="x-gpus" inputmode="numeric" value="${esc(EXP.gpus)}"></label><div class="fl"><span>Chip</span><button class="chipb on" type="button">H100</button></div></div>
+    <div class="f2"><label class="fl"><span>Contract ends</span><input id="x-ends" type="date" value="${esc(EXP.ends)}"></label><label class="fl"><span>Your rate today</span><input id="x-rate" inputmode="decimal" placeholder="$ per GPU hour" value="${esc(EXP.rate)}"></label></div>
+    <div id="x-out">${expOut()}</div></div></section>`;
+}
+function expOut() {
+  const n = Math.floor(Number(EXP.gpus)), r = Number(EXP.rate), ix = expIndex();
+  if (!(n > 0) || !(r > 0) || !EXP.ends) return "";
+  const rent = n * r * HOURS_MONTH;
+  const link = ix ? `${esc(day(ix.day))} print ${usd(ix.value, 4)}, ${ix.post ? `<a href="${esc(ix.post.url)}" target="_blank" rel="noopener">posted on Solana, slot ${ix.post.slot}</a>` : "offchain"}` : "Loading the index.";
+  return `<div class="xr"><div class="xh"><i>Rent at risk from ${esc(day(EXP.ends))}</i><b>${usd(rent, 0)}<small> a month</small></b></div>
+    <div class="xl"><span>If H100 drops 10%</span><b>${usd(rent * 0.1, 0)} less a month</b></div>
+    <div class="xl"><span>If H100 drops 20%</span><b>${usd(rent * 0.2, 0)} less a month</b></div>
+    <p class="xi">Index used: H100 ${link}.</p></div>
+    ${EXP.floor ? floorHtml(n, r, ix) : '<button class="cta" id="x-floor">Floor these hours</button>'}`;
+}
+function floorHtml(n, r, ix) {
+  const { win, puts } = expFloors();
+  if (!win || !ix) return '<p class="st">No month is open to floor right now.</p>';
+  const target = ix.value * 0.9;
+  if (!puts.some((m) => m.id === EXP.strike)) EXP.strike = puts.reduce((p, m) => (Math.abs(m.strike - target) < Math.abs(p.strike - target) ? m : p)).id;
+  const m = puts.find((x) => x.id === EXP.strike);
+  if (EXP.capFor !== m.id) { EXP.capFor = m.id; EXP.cap = null; api(`capacity?series=${m.id}`).then((c) => { EXP.cap = c; const o = $("#x-out"); if (o) { o.innerHTML = expOut(); bindExpOut(); } }).catch(() => {}); }
+  const c = EXP.cap;
+  const backing = c ? (c.vault && c.vault.contracts > 0 ? c.vault.contracts : c.desk) : null;
+  const size = c ? Math.max(0, Math.min(n, c.maxPerTrade, backing)) : null;
+  const by = c ? (c.vault && c.vault.contracts > 0 ? "the weekly vault" : "the venue desk") : "";
+  const prem = size === null ? null : m.model.ask * feeMul() * size;
+  const pays = size === null ? null : m.maxPayoff * size;
+  const earns = size === null ? null : Math.max(0, size * HOURS_MONTH * Math.max(0, r - (ix.value - m.strike)) - prem);
+  const low = m.strike - m.cap;
+  return `<div class="xf"><div class="lab">Floor strike, 10% below the index</div><div class="ch c4">${puts.map((x) => `<button data-xk="${x.id}" class="${x.id === m.id ? "on" : ""}">$${x.strike.toFixed(2)}</button>`).join("")}</div>
+    <div class="lab">Expiry</div><span class="solo">${monthOf(m.windowStart)} average, ${day(m.windowStart)} to ${day(m.windowEnd)}</span>
+    <div class="lab">Size</div><span class="solo">${size === null ? "Checking capacity" : `${size} GPUs, ${(size * m.units).toLocaleString("en-US")} GPU hours`}</span>${size !== null && size < n ? `<p class="xi">Capped at ${size} of ${n} GPUs: ${size === c.maxPerTrade ? `${c.maxPerTrade} GPUs per trade` : `what ${by} can back`}.</p>` : ""}
+    <div class="pp"><div><i>Premium</i><b>${prem === null ? "--" : usd(prem)}</b></div><div><i>Pays up to</i><b>${pays === null ? "--" : usd(pays, 0)}</b></div></div>
+    <p class="xe">${earns === null ? "" : `Earns at least <b>${usd(earns, 0)} a month</b> on ${size} GPUs while H100 stays above ${usd(low)}.`}</p>
+    <p class="xi">Pays out on the third party index average for ${monthOf(m.windowStart)}, read by Switchboard. Backed by ${by || "the vault or the desk"}.</p>
+    <button class="cta" id="x-buy" ${size ? "" : "disabled"}>Buy floor</button><p class="st" id="x-st"></p></div>`;
+}
+function bindExposure() {
+  const set = (id, k) => { const el = $(id); if (el) el.addEventListener("input", () => { EXP[k] = el.value; const o = $("#x-out"); o.innerHTML = expOut(); bindExpOut(); }); };
+  set("#x-gpus", "gpus"); set("#x-ends", "ends"); set("#x-rate", "rate");
+  bindExpOut();
+}
+function bindExpOut() {
+  const f = $("#x-floor"); if (f) f.addEventListener("click", () => { EXP.floor = true; $("#x-out").innerHTML = expOut(); bindExpOut(); });
+  $$("[data-xk]").forEach((b) => b.addEventListener("click", () => { EXP.strike = b.dataset.xk; $("#x-out").innerHTML = expOut(); bindExpOut(); }));
+  const buy = $("#x-buy"); if (buy) buy.addEventListener("click", () => ensureWallet(expBuy));
+}
+// same quote, confirm and sign flow as Lock a month, for the chosen floor and size
+async function expBuy() {
+  const m = S.markets.find((x) => x.id === EXP.strike), c = EXP.cap, n = Math.floor(Number(EXP.gpus));
+  if (!m || !c) return;
+  const size = Math.max(0, Math.min(n, c.maxPerTrade, c.vault && c.vault.contracts > 0 ? c.vault.contracts : c.desk));
+  const st = $("#x-st");
+  try {
+    st.textContent = "Getting a firm price.";
+    const q = await api("quote", { owner: S.wallet.address, ref: refFor(), legs: [{ series: m.id, side: "buy", qty: size }] });
+    st.textContent = "";
+    dialog(`<div class="icon">?</div><b>Confirm</b>
+      <div class="lines"><div><span>Floor ${esc(m.gpu)} ${monthOf(m.windowStart)} at $${m.strike.toFixed(2)}, ${size} GPUs</span></div>
+        ${q.fee ? `<div><span>Fee</span><span>${usd(q.fee)}</span></div>` : ""}
+        <div class="big2"><span>Premium</span><span>${usd(q.pay + (q.fee || 0))}</span></div>
+        <div><span>Pays up to</span><span>${usd(m.maxPayoff * size, 0)}</span></div></div>
+      <div class="actions"><button class="btn" data-close>Cancel</button><button class="btn default" id="ok">Sign with wallet</button></div>`,
+    (dm, close) => $("#ok", dm).addEventListener("click", async () => {
+      close();
+      try {
+        const r = await signAndSubmit(q);
+        alertBox("✓", "Bought.", `Floor on ${size} H100 GPUs for ${monthOf(m.windowStart)} at $${m.strike.toFixed(2)}. Premium ${usd(q.pay + (q.fee || 0))}, pays up to ${usd(m.maxPayoff * size, 0)}. It's in your positions.`, r.url);
+        EXP.capFor = null;
+        await Promise.all([refreshMarkets(), refreshPortfolio(), refreshActivity()]); refreshSoon(); render();
+      } catch (e) { alertBox("!", "Not sent.", esc(e.message)); }
+    }));
+  } catch (e) {
+    if (/faucet/i.test(e.message) && S.wallet.kind === "burner" && !expBuy._funded) { expBuy._funded = true; await autoFund(); return expBuy(); }
+    st.textContent = e.message;
+  }
 }
 function chipRow(codes, cur, attr) {
   return `<div class="lab">Chip</div><div>${codes.map((c) => `<button class="chipb ${c === cur ? "on" : ""}" ${attr}="${c}">${esc(gpuLabel(c))}</button>`).join("")}</div>`;
@@ -565,7 +662,7 @@ function bindPortfolio() {
     await refreshPortfolio(); render();
   }));
 }
-function bindDesk() { bindTicket(); bindPortfolio(); }
+function bindDesk() { bindExposure(); bindTicket(); bindPortfolio(); }
 
 // ---------- index ----------
 // Prints come from the index engine (offchain sources); each print's Memo post on devnet is the onchain part.
@@ -575,6 +672,7 @@ async function loadPrints(label) {
   IXP[label] = { loading: true };
   try { IXP[label] = await api(`index/prints?gpu=${encodeURIComponent(label)}`); } catch (e) { IXP[label] = { error: e.message }; }
   if (S.view === "index") render();
+  else if (S.view === "desk") { const o = $("#x-out"); if (o) { o.innerHTML = expOut(); bindExpOut(); } }
 }
 const utcTime = (iso) => (iso ? `${iso.slice(11, 16)} UTC` : "");
 const shortKey = (k) => (k ? `${k.slice(0, 4)}…${k.slice(-4)}` : "");

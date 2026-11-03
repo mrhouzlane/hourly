@@ -184,6 +184,7 @@ const routes = {
     return { gpu, method: data.method, publisher: posts.publisher || null, cluster: venue.CLUSTER,
       days: days.map((d) => ({ ...d, post: pc[d.day] ? { sig: pc[d.day].sig, slot: pc[d.day].slot, url: `https://explorer.solana.com/tx/${pc[d.day].sig}?cluster=devnet` } : null })) };
   },
+  "GET /api/capacity": async (req, url) => market.capacity(url.searchParams.get("series") || ""),
   "GET /api/activity": async () => feed.build(),
   "GET /api/stake": async (req, url) => feed.stake(url.searchParams.get("owner") || ""),
   "GET /api/agent/brief": async (req, url) => {
