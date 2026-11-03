@@ -7,6 +7,7 @@ const { Worker } = require("worker_threads");
 const venue = require("./engine/venue");
 const chain = require("./engine/chain");
 const ornn = require("./engine/ornn");
+const hix = require("./engine/hourlyindex");
 const model = require("./engine/model");
 const market = require("./engine/market");
 const keeper = require("./engine/keeper");
@@ -53,7 +54,9 @@ function runBacktest() {
 async function indexSummary() {
   const out = [];
   for (const [code, g] of Object.entries(ornn.GPUS)) {
-    const { points } = await ornn.get(code);
+    let src = null, points, ornnFallback = false;
+    try { src = await hix.get(code); points = src.points; }
+    catch (_) { points = (await ornn.get(code)).points; ornnFallback = true; }
     const last = points[points.length - 1];
     const ago = (n) => points[Math.max(0, points.length - 1 - n)];
     let cal = null;
@@ -64,7 +67,8 @@ async function indexSummary() {
       chg7: last.v / ago(7).v - 1, chg30: last.v / ago(30).v - 1, chg90: last.v / points[0].v - 1,
       history: points.map((p) => [p.date, p.v]),
       levelVol: cal ? cal.annualLevelVol : null, halfLifeDays: cal ? cal.halfLifeDays : null,
-      source: ornn.urlFor(code),
+      source: ornnFallback ? ornn.urlFor(code) : "hourly-index",
+      provenance: ornnFallback ? { mode: "ornn-fallback" } : { ...src.meta, stale: !!src.stale },
     });
   }
   return out;
@@ -152,6 +156,17 @@ const routes = {
   },
 
   "GET /api/index": async () => indexSummary(),
+  "GET /api/index/meta": async () => {
+    const base = process.env.INDEX_API || "http://127.0.0.1:7991";
+    const j = (p) => fetch(base + p, { signal: AbortSignal.timeout(8000) }).then((r) => r.json());
+    const [method, sources] = await Promise.all([
+      fs.promises.readFile(path.join(__dirname, "..", "index", "method.json"), "utf8").then(JSON.parse),
+      j("/v1/sources").catch(() => null),
+    ]);
+    const reg = { restricted: 0, unreviewed: 0, cleared: 0 };
+    for (const v of Object.values((sources && sources.providers) || {})) if (v.status in reg) reg[v.status]++;
+    return { method, registry: reg, attribution: "Source data: gpurentalprices/gpu-rental-prices, CC-BY-4.0 (https://huggingface.co/datasets/gpurentalprices/gpu-rental-prices)" };
+  },
   "GET /api/activity": async () => feed.build(),
   "GET /api/stake": async (req, url) => feed.stake(url.searchParams.get("owner") || ""),
   "GET /api/agent/brief": async (req, url) => {

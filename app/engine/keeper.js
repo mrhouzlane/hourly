@@ -50,8 +50,10 @@ function canonJobs(jobs) {
 // Stores the feed definition with Switchboard (so anyone can fetch it by hash)
 // and returns its 32-byte id.
 async function feedIdFor(code, dates) {
-  const { crossbar } = await switchboard();
   const feed = ornn.oracleFeed(code, dates);
+  // preview chain settles with the backup key, never through Switchboard, so listing must not need Crossbar
+  if (!venue.IS_PUBLIC) return ornn.sha256(JSON.stringify(feed.jobs));
+  const { crossbar } = await switchboard();
   let lastErr;
   for (let i = 0; i < 4; i++) {
     try {

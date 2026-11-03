@@ -24,12 +24,12 @@ export function homeView(index = []) {
     : `<div class="trow"><span class="tkr">Index unavailable</span></div>`;
   return `<div class="home hft">
   <section class="hx">
-    <div class="hxl"><span>Ornn OCPI · Solana · USDC</span><span class="lv"><i></i>UTC <b id="utc">--:--:--</b></span></div>
+    <div class="hxl"><span>Hourly index · Solana · USDC</span><span class="lv"><i></i>UTC <b id="utc">--:--:--</b></span></div>
     <h1>The execution desk<br>for <em>AI compute.</em></h1>
     <p class="hsub">Hedge GPU-hour price risk. Request a firm price, execute by signature, settle on the oracle print. Every contract fully backed in USDC on Solana.</p>
     <div class="hcta2"><button class="lp" data-go="desk">Open the desk <i>↗</i></button></div>
   </section>
-  <section class="tape"><div class="thead"><span>Ornn OCPI daily index</span><span>last / chg / 90d</span><span>${rows.length} series</span></div>${tape}</section>
+  <section class="tape"><div class="thead"><span>Hourly research index · unsigned</span><span>last / chg / 90d</span><span>${rows.length} series</span></div>${tape}</section>
   <section class="hflow">${FLOW.map((t, i) => `<div><b>${String(i + 1).padStart(2, "0")}</b>${t}</div>`).join("")}</section>
   <section class="hlay">${LAYERS.map(([n, t, s, d]) => `<article class="${s.toLowerCase()}"><b>${n}</b><h3>${t}</h3><span>${s}</span><p>${d}</p></article>`).join("")}</section>
   <section class="hfin"><button class="lp" data-go="desk">Open the desk <i>↗</i></button><small>Test money only. Not investment advice.</small></section>

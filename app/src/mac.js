@@ -226,7 +226,7 @@ function renderMenu() {
   const last = S.index.length ? S.index[0].lastDate : "";
   $("#menubar").innerHTML = `
     <button data-view="home" class="brand" title="Hourly: Trade" aria-label="Hourly"><img src="mark.svg" alt="H">ourly</button>
-    <div class="mn-nav">${[["desk", "Trade"], ["house", "House"], ["docs", "Docs"]].map(([v, l], i) => `<button data-view="${v}" class="${S.view === v ? "on" : ""}"><i>[${i + 1}]</i> ${l}</button>`).join("")}</div>
+    <div class="mn-nav">${[["desk", "Trade"], ["index", "Index"], ["quick", "Quick"], ["house", "House"], ["docs", "Docs"]].map(([v, l], i) => `<button data-view="${v}" class="${S.view === v ? "on" : ""}"><i>[${i + 1}]</i> ${l}</button>`).join("")}</div>
     <span class="spacer"></span>
     <span class="mn-live"><span class="mn-tag">${test ? "Test money" : "Mainnet"}</span>${S.index.length ? `<span class="mn-ct"><b>${S.index.length}</b> chips, last print ${last ? day(last) : ""}</span>` : ""}</span>
     <button id="wallet-btn">${S.wallet ? `${S.wallet.address.slice(0, 4)}…${S.wallet.address.slice(-4)}` : "Connect"}</button>`;
@@ -242,13 +242,13 @@ function renderMenu() {
   });
   renderChrome();
 }
-const RIBBON = { home: "Price protection for AI chip rent", desk: "AI chip rent: what it costs by the hour", house: "The House: the other side of every ticket", docs: "How Hourly works" };
+const RIBBON = { quick: "Tomorrow's chip rent: higher or lower, one tap", home: "Price protection for AI chip rent", desk: "AI chip rent: what it costs by the hour", house: "The House: the other side of every ticket", docs: "How Hourly works", index: "The Hourly Index: our own GPU rent price" };
 function renderChrome() {
   const rb = $("#ribbon"); if (rb) rb.textContent = RIBBON[S.view] || RIBBON.desk;
   const bb = $("#botbar"); if (!bb) return;
   const prints = S.index.reduce((n, g) => n + (g.history || []).length, 0);
   const first = S.index.map((g) => (g.history || [])[0]).filter(Boolean).map((h) => h[0]).sort()[0];
-  bb.innerHTML = prints ? `<span><b>${prints.toLocaleString("en-US")}</b> Ornn daily rent prints across ${S.index.length} chips${first ? ` since ${day(first)}` : ""}.</span> <button class="mn-dl" data-view="docs">How this is measured</button><span class="spacer"></span><span class="mn-r">Test flow. Not audited. Not financial advice.</span>` : "";
+  bb.innerHTML = prints ? `<span><b>${prints.toLocaleString("en-US")}</b> Hourly Index prints across ${S.index.length} chips${first ? ` since ${day(first)}` : ""}. List prices, unsigned, not settlement grade. Markets still settle on Ornn.</span> <button class="mn-dl" data-view="docs">How this is measured</button><span class="spacer"></span><span class="mn-r">Test flow. Not audited. Not financial advice.</span>` : "";
   $$("#botbar [data-view]").forEach((b) => b.addEventListener("click", () => { S.view = b.dataset.view; renderMenu(); render(); window.scrollTo(0, 0); }));
 }
 
@@ -460,6 +460,8 @@ function chartCaption() {
 let CH = null; // geometry for the crosshair
 const CHS = { W: 560, H: 300 }; // viewBox, the desk sets a wider one
 const smooth = (pts) => pts.map((p, i) => `${i ? "L" : "M"}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ");
+// a daily print holds until the next one, so draw it as a stair (same read as the Match Pro tick line)
+const stair = (pts) => pts.map((p, i) => `${i ? `H${p[0].toFixed(1)}V${p[1].toFixed(1)}` : `M${p[0].toFixed(1)},${p[1].toFixed(1)}`}`).join(" ");
 function chartSvg() {
   const t = S.t;
   const g = S.index.find((x) => x.code === t.gpu);
@@ -480,13 +482,15 @@ function chartSvg() {
   const X = (ms) => L + ((ms - t0) / (endT - t0)) * (W - L - R);
   const Y = (v) => T + (1 - (v - lo) / (hi - lo)) * (H - T - B);
   const pts = hist.map((p) => [X(Date.parse(`${p[0]}T00:00:00Z`)), Y(p[1])]);
-  const line = smooth(pts), lp = pts[pts.length - 1], base = H - B;
+  const line = stair(pts), lp = pts[pts.length - 1], base = H - B;
   const area = `${line} L${lp[0].toFixed(1)},${base} L${pts[0][0].toFixed(1)},${base} Z`;
   CH = { pts, hist, W, H };
   let zone = "", fan = "", lvl = "", grid = "";
   let tagP = lp[1], tagL = lv !== null && t.side ? Y(lv) : null;
   if (tagL !== null && Math.abs(tagL - tagP) < 20) { const mid = (tagL + tagP) / 2, sg = tagL >= tagP ? 1 : -1; tagP = mid - 10 * sg; tagL = mid + 10 * sg; }
   for (let i = 0; i <= 4; i++) { const v = lo + ((hi - lo) * i) / 4, y = Y(v); grid += `<line x1="${L}" x2="${W - R}" y1="${y}" y2="${y}" class="gl"/><text x="${W - R + 8}" y="${y + 3}" class="ax">$${v.toFixed(2)}</text>`; }
+  const wk = 7 * 86400e3;
+  for (let tt = t0 + wk; tt < Math.min(endT, lastT) - wk * 0.3; tt += wk) { const x = X(tt); grid += `<line x1="${x.toFixed(1)}" x2="${x.toFixed(1)}" y1="${T}" y2="${H - B}" class="wk"/><text x="${x.toFixed(1)}" y="${H - 8}" text-anchor="middle" class="ax">${day(new Date(tt).toISOString().slice(0, 10))}</text>`; }
   if (lv !== null && t.side) {
     const yl = Y(lv), up = t.side === "higher";
     zone = `<rect class="zone" x="${L}" y="${up ? T : yl}" width="${W - L - R}" height="${Math.max(0, up ? yl - T : base - yl)}" fill="url(#${up ? "zu" : "zd"})"/>`;
@@ -504,7 +508,6 @@ function chartSvg() {
     }
     fan += `<line x1="${xd}" x2="${xd}" y1="${T}" y2="${base}" class="dl"/><text x="${xd}" y="${H - 8}" text-anchor="end" class="ax">${day(dateM.windowEnd)}</text>`;
   }
-  const first = hist[0][0].slice(5);
   return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Recent prints with your level and date">
     <defs>
       <linearGradient id="ag" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--hz-paper)" stop-opacity=".45"/><stop offset="1" stop-color="var(--hz-paper)" stop-opacity="0"/></linearGradient>
@@ -517,9 +520,8 @@ function chartSvg() {
     <path d="${area}" fill="url(#ag)" class="area"/>
     ${fan}${lvl}
     <path d="${line}" class="ln" pathLength="1"/>
-    <circle cx="${lp[0].toFixed(1)}" cy="${lp[1].toFixed(1)}" r="9" class="halo"/><circle cx="${lp[0].toFixed(1)}" cy="${lp[1].toFixed(1)}" r="4" class="live"/>
+    <line class="hd" x1="${lp[0].toFixed(1)}" x2="${W - R}" y1="${lp[1].toFixed(1)}" y2="${lp[1].toFixed(1)}"/><circle cx="${lp[0].toFixed(1)}" cy="${lp[1].toFixed(1)}" r="9" class="halo"/><circle cx="${lp[0].toFixed(1)}" cy="${lp[1].toFixed(1)}" r="4" class="live"/>
     <rect x="${W - R + 2}" y="${(tagP - 9).toFixed(1)}" width="58" height="18" class="ptag"/><text x="${W - R + 31}" y="${(tagP + 4).toFixed(1)}" text-anchor="middle" class="ptagt">$${hist[hist.length - 1][1].toFixed(2)}</text>
-    <text x="${L}" y="${H - 8}" class="ax">${first}</text>
     <line class="xh" x1="0" x2="0" y1="${T}" y2="${base}"/><circle class="xd" r="4.5" cx="-10" cy="-10"/>
   </svg><div class="tip" hidden></div>`;
 }
@@ -1308,7 +1310,7 @@ function intelHtml() {
   const first = (rows[0].g.history || [])[0], lastd = rows[0].g.lastDate;
   return `<div class="tintel"><table class="ptab"><tr><th>Chip</th><th class="r">Rent now</th><th class="r">7d</th><th class="r">30d</th><th class="r">90d</th><th class="r">30d range</th><th class="r">Realised vol</th><th class="r">1 month, 1σ</th><th class="r">From 90d high</th><th class="r">90d</th></tr>${body}</table>
     <p class="tfine">${[ratio(h200, h100, "H200 / H100"), ratio(b200, h100, "B200 / H100")].filter(Boolean).join(" · ")}${first ? ` · ${rows[0].n} daily prints from ${day(first[0])} to ${day(lastd)}` : ""}</p>
-    <p class="tfine">Source: Ornn OCPI daily prints. Realised vol is the standard deviation of daily log changes over 30 days, times √365. "1 month, 1σ" is rent times that vol over 30 days: a size of past moves, not a forecast.</p></div>`;
+    <p class="tfine">Source: Hourly Index, daily provider-median list prices from the CC-BY gpurentalprices mirror (method v0-draft, unsigned, not settlement grade). Contracts on this page still settle on Ornn OCPI prints, which can differ. Realised vol is the standard deviation of daily log changes over 30 days, times √365. "1 month, 1σ" is rent times that vol over 30 days: a size of past moves, not a forecast.</p></div>`;
 }
 const VENUES = [
   { name: "Hourly (this page)", where: "Solana", kind: "Monthly caps, daily higher or lower, on the Ornn index", status: "Test money", can: "Trade on a private test network. Settlement by Switchboard oracle is not yet proven on devnet. No mainnet.", url: "https://github.com/mrhouzlane/hourly", checked: "12 Oct" },
@@ -1344,7 +1346,7 @@ function deskView() {
   const stats = [["30d vol", ir.vol === null ? "n/a" : (ir.vol * 100).toFixed(0) + "%"], ds[1], ds[2], ds[4]].map(([k, v]) => `<span class="spill"><i>${k}</i><b>${v}</b></span>`).join("");
   const rng = [30, 60, 90].map((n) => `<button data-rng="${n}" class="${(t.range || 30) === n ? "on" : ""}">${n}d</button>`).join("");
   const panes = [["chart", "Chart"], ["intel", "Chip intel"], ["venues", "Venues"]].map(([k, l]) => `<button data-pane="${k}" class="${pane === k ? "on" : ""}">${l}</button>`).join("");
-  const head = `<div class="thead"><div class="tpanes">${panes}</div>${pane === "chart" ? `<span class="tname">${esc(g.label)}<small>rent per hour, Ornn daily print</small></span><span class="tpx">${usd(g.last)}</span><div class="seg trng">${rng}</div>` : ""}</div>`;
+  const head = `<div class="thead"><div class="tpanes">${panes}</div>${pane === "chart" ? `<span class="tname">${esc(g.label)}<small>rent per hour, Hourly Index</small></span><span class="tpx">${usd(g.last)}</span><div class="seg trng">${rng}</div>` : ""}</div>`;
   const body = pane === "intel" ? intelHtml() : pane === "venues" ? venuesHtml() : `<div class="chart" id="chart">${chartSvg()}</div><p class="tread">${esc(readLine(t.gpu))}</p>`;
   return `<section class="tdesk">
     <div class="tmain">
@@ -1786,7 +1788,7 @@ function hmView() {
     <div class="hm-l">
       <p class="hm-k">${esc(h.label)} rent per GPU-hour</p>
       <div class="hm-big">$${h.last.toFixed(2)}</div>
-      <p class="hm-cap">Ornn daily print, ${day(h.lastDate)}. <span class="${h.chg7 >= 0 ? "up" : "dn"}">${pctSgn(h.chg7)}</span> this week.</p>
+      <p class="hm-cap">Hourly Index, ${day(h.lastDate)}. <span class="${h.chg7 >= 0 ? "up" : "dn"}">${pctSgn(h.chg7)}</span> this week.</p>
       <h1>${NARRATIVE}</h1>
       <p class="hm-s">Hourly shows what an AI chip costs to rent, by the hour, and lets you fix next week's price. Fully backed, settled on Solana.</p>
       <div class="hm-a"><button class="hm-b on" data-go="desk">Trade</button><button class="hm-b" data-go="docs">Docs</button></div>
@@ -1824,17 +1826,128 @@ GET /hourly/api/agent/prepare?chip=H100_SXM&amp;side=higher&amp;strike=2.65&amp;
   </article>`;
 }
 
+
+// ---------- Quick: one tap, loss known up front ----------
+// Same markets and firm-quote flow as Trade. Fixed stake, three levels around today's rent, higher or lower.
+S.q = { gpu: "H100_SXM", amt: 10, day: 0 };
+const QSTAKES = [5, 10, 25];
+function quickRows() {
+  const q = S.q, ms = predict().filter((m) => m.underlying === q.gpu);
+  const days = [...new Set(ms.map((m) => m.windowEnd))].sort();
+  if (q.day >= days.length) q.day = 0;
+  const at = ms.filter((m) => m.windowEnd === days[q.day]).sort((a, b) => a.strike - b.strike);
+  if (!at.length) return { days, rows: [] };
+  const last = lastPrint(q.gpu) || at[0].strike;
+  let i = at.reduce((p, m, k) => (Math.abs(m.strike - last) < Math.abs(at[p].strike - last) ? k : p), 0);
+  i = Math.min(Math.max(i, 1), Math.max(at.length - 2, 0));
+  const fee = 1 + ((S.status && S.status.feeBps) || 0) / 10000;
+  const side = (m, sd) => {
+    const unit = sideUnit(m, sd) * (sd === "higher" ? fee : 1), n = Math.floor(q.amt / unit);
+    return { m, sd, n, cost: n * unit, win: n, chance: sideChance(m, sd) };
+  };
+  return { days, rows: at.slice(i - 1 >= 0 ? i - 1 : 0, i + 2).map((m) => ({ m, hi: side(m, "higher"), lo: side(m, "lower") })) };
+}
+function quickView() {
+  const q = S.q, g = S.index.find((x) => x.code === q.gpu);
+  if (!g) return '<section class="app"><p class="small">Loading the index.</p></section>';
+  const { days, rows } = quickRows();
+  const codes = GPU_ORDER.filter((c) => predict().some((m) => m.underlying === c));
+  const btn = (r, o, lab) => `<button class="qb ${o.sd}" data-qs="${r.m.id}" data-sd="${o.sd}" ${o.n < 1 ? "disabled" : ""}><span>${lab}</span><b>Risk ${usd(o.cost)}</b><i>Win ${usd(o.win)} &middot; ${pct(o.chance)} chance</i></button>`;
+  return `<section class="app qk">
+    <header class="ahead"><span class="abrand"><img src="mark.svg" alt="">Hourly</span></header>
+    <div class="gchips">${codes.map((c) => `<button data-qg="${c}" class="${c === q.gpu ? "on" : ""}">${esc(gpuLabel(c))}</button>`).join("")}</div>
+    <div class="atitle"><b>${esc(g.label)} rent, per hour</b><span>Now: ${usd(g.last)}</span></div>
+    <div class="mchips">${days.map((d, k) => `<button data-qd="${k}" class="${k === q.day ? "on" : ""}">${day(d)}</button>`).join("")}</div>
+    <div class="mchips qamt" role="group" aria-label="Stake">${QSTAKES.map((a) => `<button data-qa="${a}" class="${a === q.amt ? "on" : ""}">${usd(a, 0)}</button>`).join("")}</div>
+    ${rows.length ? rows.map((r) => `<div class="qrow"><div class="qlvl">Day's print vs <b>${usd(r.m.strike)}</b></div><div class="qbtns">${btn(r, r.hi, "Higher")}${btn(r, r.lo, "Lower")}</div></div>`).join("") : '<p class="small">No open markets for this chip.</p>'}
+    <p class="fine">You can lose only the amount shown as Risk. Chance is a model, not a promise. Short bets like this lose for most small traders over time: SEBI found 87.7% of individual F&amp;O traders in India lost money in FY26.</p>
+    <p class="status" id="q-st"></p>
+  </section>`;
+}
+function bindQuick() {
+  $$("[data-qg]").forEach((b) => b.addEventListener("click", () => { S.q.gpu = b.dataset.qg; S.q.day = 0; render(); }));
+  $$("[data-qd]").forEach((b) => b.addEventListener("click", () => { S.q.day = Number(b.dataset.qd); render(); }));
+  $$("[data-qa]").forEach((b) => b.addEventListener("click", () => { S.q.amt = Number(b.dataset.qa); render(); }));
+  $$("[data-qs]").forEach((b) => b.addEventListener("click", () => ensureWallet(async () => {
+    const m = S.markets.find((x) => x.id === b.dataset.qs), sd = b.dataset.sd, st = $("#q-st");
+    const unit = sideUnit(m, sd) * (sd === "higher" ? 1.01 : 1), qty = Math.floor(S.q.amt / unit);
+    if (!m || qty < 1) return;
+    try {
+      st.textContent = "Getting a firm price.";
+      const qu = await api("quote", { owner: S.wallet.address, ref: refFor(), legs: [{ series: m.id, side: sd === "higher" ? "buy" : "sell", qty }] });
+      const risk = (qu.pay || 0) + (qu.fee || 0) + (qu.lock || 0) - (qu.receive || 0);
+      dialog(`<div class="icon">?</div><b>Confirm</b>
+        <div class="lines" style="clear:both">
+          <div><span>${esc(gpuLabel(m.underlying))} print on ${day(m.windowEnd)}</span><span>${sd === "higher" ? "above" : "at or below"} ${usd(m.strike)}</span></div>
+          <div class="big"><span>You can lose at most</span><span>${usd(risk)}</span></div>
+          <div><span>You win</span><span>${usd(qty)}</span></div>
+        </div>
+        <div class="actions"><button class="btn" data-close>Cancel</button><button class="btn default" id="ok">Sign with wallet</button></div>`,
+      (mm, close) => $("#ok", mm).addEventListener("click", async () => {
+        close();
+        try { const r = await signAndSubmit(qu); alertBox("✓", "Placed.", `${esc(gpuLabel(m.underlying))} ${sd === "higher" ? "above" : "at or below"} ${usd(m.strike)} on ${day(m.windowEnd)}.`, r.url); await Promise.all([refreshMarkets(), refreshPortfolio(), refreshActivity()]); render(); }
+        catch (e) { alertBox("!", "Not sent.", esc(e.message)); }
+      }));
+      st.textContent = "";
+    } catch (e) { st.textContent = e.message; }
+  })));
+}
+
+// ---------- the Hourly Index (our own price) ----------
+function indexView() {
+  const rows = S.index.filter((g) => GPU_ORDER.includes(g.code));
+  const m = S.indexMeta;
+  const pv = (rows[0] && rows[0].provenance) || {};
+  const card = (g) => {
+    const p = g.provenance || {}, c = g.chg30;
+    return `<article class="ixc"><div class="ch"><b>${esc(g.label)}</b><span>${usd(g.last)}<small>/hr</small></span></div>
+      ${sparkSvg(g.history, 360, 90)}
+      <div class="cs"><span class="${c >= 0 ? "up" : "dn"}">${c >= 0 ? "+" : ""}${(c * 100).toFixed(1)}% 30d</span><span>${p.providers || "?"} providers · ${day(g.lastDate)}</span></div></article>`;
+  };
+  const kv = (k, v) => `<div><span>${k}</span><b>${v}</b></div>`;
+  const reg = m ? m.registry : null;
+  return `<div class="ixv">
+    <section class="ixh">
+      <div class="ixl"><span>Hourly Index · USD per GPU-hour</span><span>Research grade</span></div>
+      <h1>The Hourly Index.<br><em>Our own</em> GPU rent price.</h1>
+      <p class="ixs">One daily number per chip, built by us from public rental list prices. Every print carries its method version and the hash of its inputs, so anyone can recompute it. Not settlement grade yet.</p>
+    </section>
+    <section class="ixg">${rows.map(card).join("")}</section>
+    <section class="ixm">
+      <h3>How it is built</h3>
+      ${m ? `<div class="ixkv">
+        ${kv("Method", esc(m.method.version))}
+        ${kv("Unit", esc(m.method.unit))}
+        ${kv("Per provider", "median of on-demand list prices")}
+        ${kv("Across providers", "equal weight, " + m.method.winsorize_pct.join("th to ") + "th percentile winsorized")}
+        ${kv("Excluded", esc(m.method.exclude_classes.join(", ")))}
+        ${kv("Minimum", m.method.min_providers + " providers per print")}
+        ${kv("Last print", pv.providers ? pv.providers + " providers (H100)" : "n/a")}
+        ${kv("Signed prints", String(pv.signedPrints || 0) + " of " + (pv.prints || 0))}
+        ${kv("Rights registry", reg ? `${reg.cleared} cleared · ${reg.unreviewed} unreviewed · ${reg.restricted} restricted` : "n/a")}
+      </div>
+      <p class="fine">Today these prints are research grade: list prices, not trades, from a CC-BY dataset, with no provider cleared for settlement and no signatures. Executed prints from contributor trades come next. The parameters are a draft awaiting review.</p>
+      <p class="fine">${esc(m.attribution)}</p>` : `<p class="fine">Method details unavailable.</p>`}
+    </section>
+    <section class="ixm"><h3>Settlement</h3><p class="fine">Contracts on Hourly still settle on Ornn OCPI prints until the Hourly Index is signed and rights-cleared. The chart and numbers on this page are ours.</p></section>
+  </div>`;
+}
+async function bindIndex() {
+  if (S.indexMeta) return;
+  try { S.indexMeta = await api("index/meta"); if (S.view === "index") render(); } catch (_) { /* page still shows the chips */ }
+}
+
 function render() {
-  if (!["home", "desk", "house", "docs", "hedge"].includes(S.view)) S.view = "desk";
-  const views = { home: hmView, docs: docsView, desk: deskView, house: houseView, strat: stratView, hedge: hedgeView, activity: activityView, earn: earnView };
+  if (!["home", "desk", "house", "docs", "hedge", "quick", "index"].includes(S.view)) S.view = "desk";
+  const views = { home: hmView, docs: docsView, desk: deskView, house: houseView, strat: stratView, hedge: hedgeView, activity: activityView, earn: earnView, quick: quickView, index: indexView };
   CHS.W = 560; CHS.H = 300;
   $("#desk").innerHTML = views[S.view]();
   document.body.classList.remove("fit", "onhome", "onnote");
   document.body.classList.add("dk");
-  document.body.classList.toggle("onhm", S.view === "home" || S.view === "docs");
+  document.body.classList.toggle("onhm", S.view === "home" || S.view === "docs" || S.view === "index");
   document.body.classList.toggle("ondesk", S.view === "desk" || S.view === "strat" || S.view === "house");
   document.body.classList.toggle("onterm", S.view === "desk");
-  ({ home: bindHm, docs: () => {}, desk: bindDesk, house: bindHouse, strat: bindStrat, hedge: bindHedge, activity: bindActivity, earn: bindEarn })[S.view]();
+  ({ home: bindHm, docs: () => {}, desk: bindDesk, house: bindHouse, strat: bindStrat, hedge: bindHedge, activity: bindActivity, earn: bindEarn, quick: bindQuick, index: bindIndex })[S.view]();
   tickClocks();
 }
 
