@@ -247,6 +247,37 @@ const routes = {
     return { signature: r.signature, url: venue.explorer(r.signature), meta: r.meta };
   },
 
+  // Request access form on the home page. Stored on this VM only, one JSON line per request.
+  "POST /api/access": async (req, url, body, ip) => {
+    if (!allow(`ac:${ip}`, 5, 3_600_000)) throw venue.httpError(429, "Too many requests. Try again in an hour.");
+    const str = (v, n) => (typeof v === "string" ? v.trim().slice(0, n) : "");
+    const pick = (v, ok) => (ok.includes(v) ? v : "");
+    const rec = {
+      at: new Date().toISOString(),
+      company: str(body && body.company, 120),
+      email: str(body && body.email, 160),
+      name: str(body && body.name, 120),
+      role: pick(body && body.role, ["GPU owner", "Data center", "Reseller", "Renter"]),
+      chips: Array.isArray(body && body.chips) ? body.chips.filter((c) => ["H100", "H200", "B200", "A100"].includes(c)) : [],
+      gpuCount: pick(body && body.gpuCount, ["Under 64", "64 to 511", "512 to 4k", "4k plus"]),
+      contractEnds: /^\d{4}-\d{2}-\d{2}$/.test(str(body && body.contractEnds, 10)) ? body.contractEnds : "",
+      gpusCovered: Number.isFinite(Number(body && body.gpusCovered)) && body.gpusCovered !== "" ? Math.max(0, Math.min(1e7, Math.floor(Number(body.gpusCovered)))) : null,
+      rate: pick(body && body.rate, ["Under $1.50", "$1.50 to $2.50", "$2.50 to $3.50", "Over $3.50"]),
+      decides: pick(body && body.decides, ["Me", "Finance lead", "Founder or CEO", "Someone else"]),
+      call: pick(body && body.call, ["Yes", "Not now"]),
+    };
+    const missing = [];
+    if (!rec.company) missing.push("company");
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(rec.email)) missing.push("email");
+    if (!rec.role) missing.push("role");
+    if (!rec.chips.length) missing.push("chips");
+    if (!rec.gpuCount) missing.push("gpuCount");
+    if (missing.length) { const e = venue.httpError(400, "Please fill in the highlighted fields."); e.fields = missing; throw e; }
+    await fs.promises.mkdir(path.join(__dirname, "state"), { recursive: true });
+    await fs.promises.appendFile(path.join(__dirname, "state", "access-requests.jsonl"), JSON.stringify(rec) + "\n", { mode: 0o600 });
+    log("access request", rec.company);
+    return { ok: true };
+  },
   "POST /api/faucet": async (req, url, body, ip) => {
     if (venue.CLUSTER === "mainnet") throw venue.httpError(404, "There is no faucet on mainnet.");
     let owner;
@@ -264,6 +295,11 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, "http://localhost");
   const key = `${req.method} ${url.pathname}`;
   if ((req.method === "GET" || req.method === "HEAD") && /^\/(freeze|cap)\/?$/.test(url.pathname)) return serveStatic(req, res, "/freeze.html");
+  // Quick was folded into Trade as the One tap mode; old links land there.
+  if ((req.method === "GET" || req.method === "HEAD") && /^\/quick\/?$/.test(url.pathname)) {
+    res.writeHead(302, { location: url.pathname.endsWith("/") ? "../?mode=tap" : "./?mode=tap" });
+    return res.end();
+  }
   const handler = routes[key];
   if (!handler) {
     if (url.pathname.startsWith("/api/")) return send(res, 404, { error: "not found" });
@@ -278,7 +314,7 @@ const server = http.createServer(async (req, res) => {
   } catch (e) {
     const status = e.status || 500;
     if (status >= 500) log("error", key, e.stack || e.message);
-    send(res, status, { error: status >= 500 ? `Server error: ${String(e.message || e).slice(0, 200)}` : e.message });
+    send(res, status, { error: status >= 500 ? `Server error: ${String(e.message || e).slice(0, 200)}` : e.message, ...(e.fields ? { fields: e.fields } : {}) });
   }
 });
 
