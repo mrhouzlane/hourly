@@ -258,3 +258,5 @@ body.busy { cursor: progress; }
 .acc { margin-top: 110px; }
 .acc .body { padding-bottom: 24px; }
 .dep { width: 320px; margin: 22px 0 0 auto; } @media (max-width: 760px) { .dep { width: auto; } }
+.solo { font: 500 11.5px/31px var(--mono); }
+@media (max-width: 760px) { .modes button { font-size: 10px; letter-spacing: 0.04em; } }
