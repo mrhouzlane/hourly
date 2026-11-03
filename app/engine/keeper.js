@@ -54,20 +54,24 @@ async function feedIdFor(code, dates) {
   const feed = ornn.oracleFeed(code, dates);
   // preview chain settles with the backup key, never through Switchboard, so listing must not need Crossbar
   if (!venue.IS_PUBLIC) return ornn.sha256(JSON.stringify(feed.jobs));
-  const { crossbar } = await switchboard();
-  let lastErr;
-  for (let i = 0; i < 4; i++) {
-    try {
-      const r = await crossbar.storeOracleFeed(feed);
-      // never trust the returned id blindly: fetch it back and compare the job
-      const back = await crossbar.fetchOracleFeed(r.feedId);
-      if (canonJobs(back && back.feed && back.feed.jobs) !== canonJobs(feed.jobs)) {
-        throw new Error(`crossbar feed ${r.feedId} does not match our definition`);
-      }
-      return Buffer.from(r.feedId.replace(/^0x/, ""), "hex");
-    } catch (e) { lastErr = e; await sleep(1500 * (i + 1)); }
+  // The feed id is a hash of the feed definition, computed by the Switchboard SDK itself, so listing
+  // does not depend on Crossbar being up. Storing the definition at Crossbar only makes it fetchable
+  // by id; when Crossbar answers, its id must equal ours or we refuse to list.
+  const { FeedHash } = require("@switchboard-xyz/common");
+  const id = FeedHash.computeOracleFeedId(feed);
+  try {
+    const { crossbar } = await switchboard();
+    const r = await crossbar.storeOracleFeed(feed);
+    const back = await crossbar.fetchOracleFeed(r.feedId);
+    if (r.feedId.replace(/^0x/, "") !== id.toString("hex")) throw new Error(`crossbar feed id ${r.feedId} != sdk ${id.toString("hex")}`);
+    if (canonJobs(back && back.feed && back.feed.jobs) !== canonJobs(feed.jobs)) {
+      throw new Error(`crossbar feed ${r.feedId} does not match our definition`);
+    }
+  } catch (e) {
+    if (/!=|does not match/.test(e.message)) throw e;
+    log("crossbar store skipped, feed id computed by the sdk", id.toString("hex"), e.code || e.message);
   }
-  throw lastErr;
+  return id;
 }
 
 async function listOne(spec) {

@@ -10,5 +10,17 @@
     "sig": "4fS9F34BkWoBi61rUF94XbQ73dLo9YqNU63CG1eJmG8CPqKkMj3qUbK6FfMjtb9sQjBwhZCAr5Tsk474jzhTuUQ7",
     "url": "https://explorer.solana.com/tx/4fS9F34BkWoBi61rUF94XbQ73dLo9YqNU63CG1eJmG8CPqKkMj3qUbK6FfMjtb9sQjBwhZCAr5Tsk474jzhTuUQ7?cluster=devnet",
     "at": "2026-11-03T08:22:03.217Z"
+  },
+  {
+    "what": "faucet",
+    "sig": "4xvXPRxFawskeatysd5Co7NUkRcjMcdaTgej2zjt5RkKdm5YAMS7Y8WQbw4oFtkNgHbtrYDiekszMJMhjmBaQwss",
+    "url": "https://explorer.solana.com/tx/4xvXPRxFawskeatysd5Co7NUkRcjMcdaTgej2zjt5RkKdm5YAMS7Y8WQbw4oFtkNgHbtrYDiekszMJMhjmBaQwss?cluster=devnet",
+    "at": "2026-11-03T08:49:00.515Z"
+  },
+  {
+    "what": "trade",
+    "sig": "4S2X5D98kdbvJWeMY6NaBz4J91tZMCyS5eZqon8bhFSHguj1rcdNJhB13YLozAgCZYJEfHgFopAd5qdx31nj86sZ",
+    "url": "https://explorer.solana.com/tx/4S2X5D98kdbvJWeMY6NaBz4J91tZMCyS5eZqon8bhFSHguj1rcdNJhB13YLozAgCZYJEfHgFopAd5qdx31nj86sZ?cluster=devnet",
+    "at": "2026-11-03T08:49:16.584Z"
   }
 ]
