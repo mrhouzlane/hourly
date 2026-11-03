@@ -52,7 +52,8 @@ async function api(path, body) {
 
 // ---------- state ----------
 const VIEWS = ["home", "desk", "index", "house", "docs", "access"];
-const HASH = { trade: "desk", index: "index", house: "house", docs: "docs", home: "home", access: "access" };
+// "portfolio" kept so old links (the Colosseum submission points at #portfolio) land on Trade, where Positions live.
+const HASH = { trade: "desk", index: "index", house: "house", docs: "docs", home: "home", access: "access", portfolio: "desk" };
 const qs0 = (() => { try { return new URLSearchParams(location.search); } catch (_) { return new URLSearchParams(); } })();
 const mode0 = ["ticket", "tap", "lock"].includes(qs0.get("mode")) ? qs0.get("mode") : null;
 const S = {
@@ -884,6 +885,7 @@ window.addEventListener("hashchange", () => { const v = HASH[location.hash.slice
   store.set("hourly.cleanboot", JSON.stringify({ status: S.status, index: S.index, markets: S.markets, vaults: S.vaults, activity: S.activity }));
   (window.requestIdleCallback || setTimeout)(() => registerMetaMask());
   await restoreWallet();
+  if (location.hash === "#portfolio") { refreshPortfolio().then(() => { if (S.view === "desk") { render(); const el = document.querySelector(".pos"); if (el) el.scrollIntoView(); } }); }
   let last = "", tick = 0;
   const busy = () => document.hidden || document.querySelector(".modal") || S.t.quote || S.t.quoting || (document.activeElement && /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName));
   setInterval(async () => {
