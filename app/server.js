@@ -130,10 +130,15 @@ function serveStatic(req, res, urlPath) {
 const routes = {
   "GET /api/health": async () => ({ ok: true, cluster: venue.CLUSTER, time: new Date().toISOString() }),
 
+  // Answers even when the chain is unreachable: a dead RPC is a status to report, not a 500.
   "GET /api/status": async () => {
-    const cfg = await venue.readConfig();
+    let cfg = null, rpcError = null;
+    try { cfg = await venue.readConfig(); } catch (e) { rpcError = e.message; }
     return {
       cluster: venue.CLUSTER,
+      rpcOk: !rpcError,
+      rpcError,
+      crossbar: keeper.CROSSBAR_URL,
       rpc: venue.IS_PUBLIC ? venue.RPC_URL : "local validator",
       programId: chain.PROGRAM_ID.toBase58(),
       programUrl: venue.explorerAddr(chain.PROGRAM_ID.toBase58()),
