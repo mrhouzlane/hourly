@@ -9,7 +9,8 @@ const venue = require("./venue");
 const market = require("./market");
 const catalog = require("./catalog");
 
-const CROSSBAR_URL = process.env.CROSSBAR_URL || "https://crossbar.switchboardlabs.xyz";
+// crossbar.switchboardlabs.xyz is retired; this is the default host of @switchboard-xyz/common.
+const CROSSBAR_URL = process.env.CROSSBAR_URL || "https://crossbar.switchboard.xyz";
 const FALLBACK_DELAY_S = 72 * 3600;
 const ORACLE_GRACE_S = 2 * 3600; // must match ORACLE_GRACE in the program
 const MAKER_FLOOR_USD = 2_000_000;
@@ -302,6 +303,7 @@ function start(intervalMs = 120_000) {
 }
 
 module.exports = {
+  CROSSBAR_URL,
   start, tick, rollListings, settleDue, settleOracle, settleFallback, listOne, feedIdFor, restockMaker,
   ensureVaults, collectVaults, readVaults, currentEpoch, epochStart, VAULT_CAP_BPS,
 };
