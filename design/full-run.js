@@ -20,26 +20,32 @@ const step = (n, ok, d = '') => { res.push({ n, ok, d }); console.log(`${ok ? 'P
   await p.click('#t-go'); await p.click('.modal [data-burner]');
   await p.waitForSelector('#t-sign', { timeout: 240000 }); await p.screenshot({ path: `${D}/floor-firm.png` }); last = null;
   await p.click('#t-sign'); let t = await ok('floor-placed'); txs.floor = last;
-  step('Ticket: Floor trade fills', /Placed/.test(t) && !!last, last || t.slice(0, 120));
+  step('Ticket: Floor trade fills', /Bought/.test(t) && !!last, last || t.slice(0, 120));
   // 2. Cap via One tap
   await p.waitForTimeout(2000); await p.click('[data-mode="tap"]'); await p.waitForTimeout(800); await p.click('[data-tamt="10"]');
   await p.screenshot({ path: `${D}/tap.png` });
   await p.click('[data-tap][data-tside="higher"]');
   await p.waitForSelector('#t-sign', { timeout: 240000 }); last = null; await p.click('#t-sign'); t = await ok('cap-placed'); txs.cap = last;
-  step('One tap: Cap trade fills', /Placed/.test(t) && !!last, last || t.slice(0, 120));
+  step('One tap: Cap trade fills', /Bought/.test(t) && !!last, last || t.slice(0, 120));
   // 3. Lock a month (Floor)
   await p.waitForTimeout(2000); await p.click('[data-mode="lock"]'); await p.waitForTimeout(800); await p.screenshot({ path: `${D}/lock.png` });
   await p.click('#hedge-go'); await p.waitForSelector('.modal #ok', { timeout: 240000 }); last = null; await p.click('.modal #ok');
   t = await ok('lock-placed'); txs.lock = last;
   step('Lock a month: Floor fills', /Locked/.test(t) && !!last, last || t.slice(0, 120));
+  // 3b. Index with sources open, Home
+  await p.click('#menubar [data-view="index"]'); await p.waitForSelector('#ix-open', { timeout: 60000 }); await p.click('#ix-open'); await p.waitForTimeout(800);
+  const src = await p.innerText('.src'); await p.screenshot({ path: `${D}/index-sources.png`, fullPage: true });
+  step('Index: number, slot link, sources', /posted on Solana, slot \d+/.test(await p.innerText('.ixbig')) && /Rule/.test(src) && /Publisher key/.test(src), src.replace(/\s+/g, ' ').slice(0, 120));
+  await p.click('#menubar .brand'); await p.waitForTimeout(1500); await p.screenshot({ path: `${D}/home.png` });
+  await p.click('#menubar [data-view="desk"]'); await p.waitForTimeout(2500);
   // 4. Portfolio
-  await p.waitForTimeout(4000); await p.click('[data-mode="ticket"]'); await p.waitForTimeout(3000);
+  await p.click('[data-mode="ticket"]'); await p.waitForTimeout(4000);
   const pos = await p.innerText('.pos'); await p.screenshot({ path: `${D}/positions.png`, fullPage: true });
   step('Portfolio shows positions', /floor/i.test(pos) && /cap/i.test(pos), pos.replace(/\s+/g, ' ').slice(0, 200));
   // 5. House deposit
   await p.click('#menubar [data-view="house"]'); await p.waitForTimeout(2500);
   await p.click('#hdep-go'); await p.waitForSelector('.modal #ok'); await p.fill('.modal #hdep', '100'); last = null; await p.click('.modal #ok');
-  t = await ok('deposit'); txs.deposit = last;
+  t = await ok('deposit'); txs.deposit = last; await p.waitForTimeout(2500); await p.screenshot({ path: `${D}/house.png`, fullPage: true });
   step('House: vault deposit', /Deposited/.test(t) && !!last, last || t.slice(0, 120));
   await ctx.close();
   // 6. Add test USDC button on a restored burner (no auto fund)

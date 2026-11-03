@@ -271,7 +271,7 @@ async function readVaults() {
     const cash = await venue.conn.getTokenAccountBalance(d.cash).then((r) => Number(r.value.amount) / 1e6).catch(() => 0);
     const supply = await venue.conn.getTokenSupply(d.shareMint).then((r) => Number(r.value.amount) / 1e6).catch(() => 0);
     out.push({
-      epoch: d.epoch, pubkey: v.pubkey, shareMint: d.shareMint.toBase58(), quoteMint,
+      epoch: d.epoch, pubkey: v.pubkey, cashAccount: d.cash.toBase58(), shareMint: d.shareMint.toBase58(), quoteMint,
       depositEnd: Number(d.depositEnd), epochEnd: Number(d.epochEnd),
       deposits: Number(d.deposits) / 1e6, cash, shareSupply: supply,
       premiums: Number(d.premiums) / 1e6, openSeries: d.openSeries, capBps: d.maxSeriesBps,

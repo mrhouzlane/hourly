@@ -172,6 +172,18 @@ const routes = {
     for (const v of Object.values((sources && sources.providers) || {})) if (v.status in reg) reg[v.status]++;
     return { method, registry: reg, attribution: "Source data: gpurentalprices/gpu-rental-prices, CC-BY-4.0 (https://huggingface.co/datasets/gpurentalprices/gpu-rental-prices)" };
   },
+  // Hourly Index daily prints with their sources (offchain) and their devnet Memo posts (onchain), one chip per call.
+  "GET /api/index/prints": async (req, url) => {
+    const read = (f) => { const p = path.join(__dirname, "state", f); const m = fs.statSync(p).mtimeMs; const c = printsCache[f]; if (c && c.m === m) return c.v; const v = JSON.parse(fs.readFileSync(p, "utf8")); printsCache[f] = { m, v }; return v; };
+    const data = read("index-prints.json");
+    let posts = { chips: {} }; try { posts = read("index-posts.json"); } catch (_) { /* nothing posted yet */ }
+    const gpu = url.searchParams.get("gpu") || "H100";
+    const days = data.chips[gpu];
+    if (!days) throw venue.httpError(404, "unknown chip");
+    const pc = posts.chips[gpu] || {};
+    return { gpu, method: data.method, publisher: posts.publisher || null, cluster: venue.CLUSTER,
+      days: days.map((d) => ({ ...d, post: pc[d.day] ? { sig: pc[d.day].sig, slot: pc[d.day].slot, url: `https://explorer.solana.com/tx/${pc[d.day].sig}?cluster=devnet` } : null })) };
+  },
   "GET /api/activity": async () => feed.build(),
   "GET /api/stake": async (req, url) => feed.stake(url.searchParams.get("owner") || ""),
   "GET /api/agent/brief": async (req, url) => {
@@ -299,6 +311,7 @@ const routes = {
 };
 
 const vaultCache = { at: 0, list: null };
+const printsCache = {};
 const server = http.createServer(async (req, res) => {
   res.__gzip = /\bgzip\b/.test(String(req.headers["accept-encoding"] || ""));
   const url = new URL(req.url, "http://localhost");

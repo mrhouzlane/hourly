@@ -186,7 +186,9 @@ async function faucet() {
 
 // ---------- chrome ----------
 const COIN = '<span class="coin">USDC on Solana devnet (test)</span>';
-const go = (v) => { S.view = v; try { history.replaceState(null, "", `#${Object.keys(HASH).find((k) => HASH[k] === v) || v}`); } catch (_) { /* file */ } renderMenu(); render(); window.scrollTo(0, 0); };
+const go = (v) => { S.view = v; try { history.replaceState(null, "", `#${Object.keys(HASH).find((k) => HASH[k] === v) || v}`); } catch (_) { /* file */ } renderMenu(); render(); window.scrollTo(0, 0); if (v === "desk" && S.wallet) refreshPortfolio().then(() => { if (S.view === "desk" && !S.t.quote) render(); }); };
+// a fill can take a few seconds to show in account reads; read the portfolio again shortly after
+const refreshSoon = () => setTimeout(() => refreshPortfolio().then(() => { if (S.view === "desk" && !S.t.quote) render(); }), 4000);
 function renderMenu() {
   const nav = [["desk", "Trade"], ["index", "Index"], ["house", "House"], ["docs", "Docs"]];
   const ra = S.view !== "home" && S.view !== "access";
@@ -340,8 +342,9 @@ function deskInit() {
   applyDeepLink(); applyCapLink();
   const t = S.t;
   if (!levelsFor(t.gpu).length) t.gpu = GPU_ORDER.find((c) => levelsFor(c).length) || t.gpu;
-  const ks = levelsFor(t.gpu), last = lastPrint(t.gpu) || 0;
-  if (!ks.includes(t.strike)) { t.strike = ks.length ? ks.reduce((p, k) => (Math.abs(k - last) < Math.abs(p - last) ? k : p)) : null; t.seriesId = null; }
+  // open on the strike the model prices nearest 50 cents per $1, so Floor and Cap both cost well below what they pay
+  const ks = levelsFor(t.gpu), mid = (k) => { const m = datesFor(t.gpu, k)[0]; return m ? Math.abs(m.model.fair - 0.5) : 1; };
+  if (!ks.includes(t.strike)) { t.strike = ks.length ? ks.reduce((p, k) => (mid(k) < mid(p) ? k : p)) : null; t.seriesId = null; }
   const ds = t.strike !== null ? datesFor(t.gpu, t.strike) : [];
   if (!ds.some((m) => m.id === t.seriesId)) { t.seriesId = ds[0] ? ds[0].id : null; t.quote = null; }
 }
@@ -433,7 +436,8 @@ function positionsWindow() {
       const name = pred ? `${r.gpu} ${r.long && r.short ? "floor and cap" : r.short ? "floor" : "cap"} $${r.strike.toFixed(2)}` : `${r.gpu} ${monthOf(r.windowStart)} ${r.kind === "put" ? "floor" : "cap"} $${r.strike.toFixed(2)}`;
       const when = pred ? day(r.windowEnd) : monthOf(r.windowStart);
       const value = r.status === "settled" ? `paid out at $${r.settled.price.toFixed(4)}` : usd((r.markPerContract ?? 0) * (r.long - r.short));
-      return `<tr><td>${esc(name)}<div class="muted">${when} · ${r.status === "open" ? `closes in ${countdown(r.tradingEnd)}` : r.status === "settled" ? "paid out" : esc(r.status)}</div></td><td>${r.long ? `long ${r.long}` : ""} ${r.short ? `short ${r.short}` : ""}</td><td class="r">${value}</td><td class="r">${actions(r)}</td></tr>`;
+      const rule = pred ? `Pays out on the third party index print for ${day(r.windowEnd)}, read by Switchboard. Not the Hourly Index yet.` : `Pays out on the third party index average for ${monthOf(r.windowStart)}, read by Switchboard. Not the Hourly Index yet.`;
+      return `<tr><td>${esc(name)}<div class="muted">${when} · ${r.status === "open" ? `closes in ${countdown(r.tradingEnd)}` : r.status === "settled" ? "paid out" : esc(r.status)}</div><div class="muted rule">${rule}</div></td><td>${r.long ? `long ${r.long}` : ""} ${r.short ? `short ${r.short}` : ""}</td><td class="r">${value}</td><td class="r">${actions(r)}</td></tr>`;
     }).join("");
     const vrows = (p.vaults || []).map((v) => `<tr><td>Weekly vault, epoch ${v.epoch}<div class="muted">${esc(v.phase)}</div></td><td>${pct(v.share)}</td><td class="r">${usd(v.cashValue)}</td><td class="r">${v.phase === "withdrawable" ? `<button class="mini" data-vw="${v.epoch}">Withdraw</button>` : ""}</td></tr>`).join("");
     body = rows || vrows ? `<table class="tb"><tr><th>Position</th><th>Side</th><th class="r">Value</th><th></th></tr>${rows}${vrows}</table>` : '<p class="empty">Nothing yet. Your first ticket shows up here.</p>';
@@ -508,9 +512,10 @@ async function deskSign() {
   try {
     const r = await signAndSubmit(t.quote);
     const m = curMarket();
-    alertBox("✓", "Placed.", `${esc(gpuLabel(t.gpu))} ${SIDE_LABEL[t.side].toLowerCase()} at $${m.strike.toFixed(2)} on ${day(m.windowEnd)}. It's in your positions.`, r.url);
+    const q = t.quote, paid = t.side === "higher" ? q.pay + q.fee : q.lock - q.receive;
+    alertBox("✓", "Bought.", `${esc(gpuLabel(t.gpu))} ${SIDE_LABEL[t.side].toLowerCase()} at $${m.strike.toFixed(2)} on ${day(m.windowEnd)}. Premium ${usd(paid)}, pays up to ${usd(q.legs[0].qty)}. It's in your positions.`, r.url);
     t.quote = null;
-    await Promise.all([refreshMarkets(), refreshPortfolio(), refreshActivity()]);
+    await Promise.all([refreshMarkets(), refreshPortfolio(), refreshActivity()]); refreshSoon();
     render();
   } catch (e) { t.qerr = e.message || "The wallet declined."; t.quote = null; renderTicket(); }
 }
@@ -532,7 +537,7 @@ async function lockQuote() {
       <div class="actions"><button class="btn" data-close>Cancel</button><button class="btn default" id="ok">Sign with wallet</button></div>`,
     (m, close) => $("#ok", m).addEventListener("click", async () => {
       close();
-      try { const r = await signAndSubmit(q); alertBox("✓", "Locked.", `${esc(put.gpu)} ${monthOf(put.windowStart)} is in your positions.`, r.url); await Promise.all([refreshMarkets(), refreshPortfolio(), refreshActivity()]); render(); }
+      try { const r = await signAndSubmit(q); alertBox("✓", "Locked.", `${esc(put.gpu)} ${monthOf(put.windowStart)} is in your positions.`, r.url); await Promise.all([refreshMarkets(), refreshPortfolio(), refreshActivity()]); refreshSoon(); render(); }
       catch (e) { alertBox("!", "Not sent.", esc(e.message)); }
     }));
     st.textContent = "";
@@ -563,23 +568,61 @@ function bindPortfolio() {
 function bindDesk() { bindTicket(); bindPortfolio(); }
 
 // ---------- index ----------
+// Prints come from the index engine (offchain sources); each print's Memo post on devnet is the onchain part.
+const IXP = {};
+async function loadPrints(label) {
+  if (IXP[label]) return;
+  IXP[label] = { loading: true };
+  try { IXP[label] = await api(`index/prints?gpu=${encodeURIComponent(label)}`); } catch (e) { IXP[label] = { error: e.message }; }
+  if (S.view === "index") render();
+}
+const utcTime = (iso) => (iso ? `${iso.slice(11, 16)} UTC` : "");
+const shortKey = (k) => (k ? `${k.slice(0, 4)}…${k.slice(-4)}` : "");
+const exAddr = (a) => `https://explorer.solana.com/address/${a}?cluster=devnet`;
+function onchainLink(d) {
+  return d.post ? `<a href="${esc(d.post.url)}" target="_blank" rel="noopener">posted on Solana, slot ${d.post.slot}</a>` : '<span class="tag ghost">offchain</span>';
+}
+function sourcesHtml(d, data) {
+  const m = data.method || {}, w = m.winsorize_pct || [10, 90], b = d.bounds || [];
+  const rows = (d.providers || []).map((x) => `<tr><td>${esc(x.name)}</td><td class="r">${usd(x.usd_hr, 4)}</td><td>${x.fetched_at ? `${day(x.fetched_at.slice(0, 10))} ${utcTime(x.fetched_at)}` : ""}</td><td>${x.clamped ? `clamped to ${usd(x.usd_hr > (b[1] || 0) ? b[1] : b[0], 2)}` : ""}</td></tr>`).join("");
+  return `<div class="src">
+    <table class="tb"><tr><th>Source</th><th class="r">Price per GPU hour</th><th>Read at</th><th>Note</th></tr>${rows}</table>
+    <p><b>Rule.</b> Each source counts once: the median of its on demand list prices. Values outside the ${w[0]}th to ${w[1]}th percentile are clamped to the edge${b.length ? ` (${usd(b[0])} to ${usd(b[1])})` : ""}, not dropped. The print is the equal weight average of the ${d.n_providers} sources. Hyperscalers are excluded. At least ${m.min_providers || 5} sources per print. Method ${esc(m.version || "")}.</p>
+    <p><b>Input hash.</b> <span class="mono">sha256 ${esc(d.inputs_sha256 || "")}</span></p>
+    <p><b>Publisher key.</b> ${data.publisher ? `<a href="${exAddr(data.publisher)}" target="_blank" rel="noopener" class="mono">${esc(data.publisher)}</a>` : "none"}. The sources are offchain; the posted print is onchain.</p>
+  </div>`;
+}
 function indexView() {
   const g = S.index.find((x) => x.code === S.ixChip) || chips()[0];
   if (!g) return '<div class="pg"><h1>Hourly Index</h1></div>';
-  const p = g.provenance || {}, hist = g.history || [];
-  const h = S.ixRange === "all" ? hist : hist.slice(-Number(S.ixRange));
+  const data = IXP[g.label];
+  if (!data) loadPrints(g.label);
+  const days = (data && data.days) || [];
+  const last = [...days].reverse().find((x) => x.value !== null);
+  const seg = `<span class="seg">${chips().map((c) => `<button data-ix="${c.code}" class="${c.code === g.code ? "on" : ""}">${esc(c.label)}</button>`).join("")}</span>`;
+  const big = last ? `<section class="win ixbig"><div class="bh">${seg}</div>
+      <button class="num" id="ix-open" aria-expanded="${S.ixOpen ? "true" : "false"}">${usd(last.value, 4)}<small>/hr</small></button>
+      <p class="when">${esc(g.label)} print for ${day(last.day)}, computed ${day(last.computed_at.slice(0, 10))} ${utcTime(last.computed_at)}. ${last.n_providers} sources.</p>
+      <p class="onc">${onchainLink(last)}</p>
+      <p class="hint">${S.ixOpen ? "Where this number comes from:" : "Click the number to see where it comes from."}</p>
+      ${S.ixOpen ? sourcesHtml(last, data) : ""}</section>` : `<section class="win ixbig"><div class="bh">${seg}</div><p class="when">${data && data.error ? esc(data.error) : "Loading prints."}</p></section>`;
+  const recent = days.slice(-30).reverse().map((d) => d.value === null
+    ? `<tr class="gap"><td>${day(d.day)}</td><td colspan="3">no print</td></tr>`
+    : `<tr><td>${day(d.day)}</td><td class="r">${usd(d.value, 4)}</td><td class="r">${d.n_providers}</td><td>${onchainLink(d)}</td></tr>`).join("");
+  const hist = g.history || [], h = S.ixRange === "all" ? hist : hist.slice(-Number(S.ixRange));
   return `<div class="pg">
     <h1>Hourly Index</h1>
     <p class="sub">USD per GPU hour. One print a day per chip.</p>
-    <div class="strip"><span class="tag">Unsigned</span><span>Unsigned, ${p.signedPrints || 0} of ${p.prints || hist.length}</span></div>
-    <div class="ixg">${chips().map((c) => `<div class="ixc"><div class="h"><b>${esc(c.label)}</b><span>${usd(c.last)}<small>/hr</small></span></div>${spark((c.history || []).slice(-90))}<div class="c">${pctSgn(c.chg30)} 30d</div></div>`).join("")}</div>
-    <section class="win big"><div class="bh"><span class="seg">${chips().map((c) => `<button data-ix="${c.code}" class="${c.code === g.code ? "on" : ""}">${esc(c.label)}</button>`).join("")}</span><span class="px">${usd(g.last)}</span><span class="seg">${[["30", "30d"], ["90", "90d"], ["all", "All"]].map(([k, l]) => `<button data-ixr="${k}" class="${S.ixRange === k ? "on" : ""}">${l}</button>`).join("")}</span></div>
+    ${big}
+    ${win("Recent prints", `<table class="tb"><tr><th>Day</th><th class="r">Price per GPU hour</th><th class="r">Sources</th><th>Onchain</th></tr>${recent}</table>`, "Daily, gaps shown", "big")}
+    <section class="win big"><div class="bh"><span class="px">${esc(g.label)} ${usd(g.last)}</span><span class="seg">${[["30", "30d"], ["90", "90d"], ["all", "All"]].map(([k, l]) => `<button data-ixr="${k}" class="${S.ixRange === k ? "on" : ""}">${l}</button>`).join("")}</span></div>
       ${areaChart(h)}</section>
   </div>`;
 }
 function bindIndex() {
   $$("[data-ix]").forEach((b) => b.addEventListener("click", () => { S.ixChip = b.dataset.ix; render(); }));
   $$("[data-ixr]").forEach((b) => b.addEventListener("click", () => { S.ixRange = b.dataset.ixr; render(); }));
+  const o = $("#ix-open"); if (o) o.addEventListener("click", () => { S.ixOpen = !S.ixOpen; render(); });
 }
 
 // ---------- house ----------
@@ -587,12 +630,14 @@ function houseView() {
   const vs = S.vaults.slice().sort((a, b) => a.epoch - b.epoch);
   const cur = vs.find((v) => v.phase === "trading") || vs[vs.length - 1];
   const prem = vs.reduce((a, v) => a + v.premiums, 0), open = vs.reduce((a, v) => a + v.openSeries, 0);
-  const rows = vs.map((v) => `<tr><td>${v.epoch}</td><td>${dayS(v.epochEnd)}</td><td>${esc(v.phase)}</td><td class="r">${usd(v.deposits, 0)}</td><td class="r">${usd(v.premiums)}</td><td class="r">${usd(v.venueSeed, 0)}</td></tr>`).join("");
+  const rows = vs.map((v) => `<tr><td>${v.epoch}</td><td>${dayS(v.epochEnd)}</td><td>${esc(v.phase)}</td><td class="r">${usd(v.deposits, 0)}</td><td class="r">${v.cashAccount ? `<a href="${exAddr(v.cashAccount)}" target="_blank" rel="noopener">${usd(v.cash)}</a>` : usd(v.cash)}</td><td class="r">${usd(v.premiums)}</td><td class="r">${usd(v.venueSeed, 0)}</td></tr>`).join("");
+  const dep = vs.filter((v) => v.phase === "deposits").sort((a, b) => a.epoch - b.epoch)[0];
   return `<div class="pg">
     <h1>The House</h1>
     <p class="sub">The other side of every ticket, backed by a weekly vault.</p>
     <div class="kp"><div><i>Epoch ${cur ? cur.epoch : ""} deposits</i><b>${cur ? usd(cur.deposits, 0) : "$0"}</b></div><div><i>Premium in, all epochs</i><b>${usd(prem)}</b></div><div><i>Open series</i><b>${open}</b></div></div>
-    ${win("Weekly vault", `<table class="tb"><tr><th>Epoch</th><th>Ends</th><th>Phase</th><th class="r">Deposits</th><th class="r">Premium</th><th class="r">Seeded by us</th></tr>${rows}</table>`, '<span class="tag ghost">Seeded by us</span>', "vault")}
+    ${win("Weekly vault", `<table class="tb"><tr><th>Epoch</th><th>Ends</th><th>Phase</th><th class="r">Deposits</th><th class="r">Collateral held</th><th class="r">Premium</th><th class="r">Seeded by us</th></tr>${rows}</table>`, '<span class="tag ghost">Seeded by us</span>', "vault")}
+    ${dep ? `<p class="coll">Collateral held, epoch ${dep.epoch}: <b>${usd(dep.cash)}</b>, <a href="${exAddr(dep.cashAccount)}" target="_blank" rel="noopener">onchain account ${shortKey(dep.cashAccount)}</a>. <span class="tag ghost">Seeded by us</span></p>` : ""}
     <div class="dep"><button class="cta" id="hdep-go">Deposit test USDC</button><p class="st" id="hd-st"></p></div>
   </div>`;
 }
@@ -609,6 +654,7 @@ function bindHouse() {
         try {
           st.textContent = "Approve the deposit in your wallet.";
           const r = await signAndSubmit(await api("vault", { type: "deposit", epoch: nx.epoch, owner: S.wallet.address, amount }));
+          st.textContent = "";
           alertBox("✓", "Deposited.", "Your share of the vault is in your positions.", r.url);
           await Promise.all([refreshMarkets(), refreshPortfolio()]); render();
         } catch (e) {
@@ -624,7 +670,7 @@ function docsView() {
   const st = S.status || {}, bt = (st.backtest && st.backtest.result) || [], fee = st.feeBps || 0;
   const m0 = predict()[0];
   const ex = m0 ? `chip=${m0.underlying}&side=higher&strike=${m0.strike}&date=${m0.windowEnd}&amount=10` : "chip=H100_SXM&side=higher&strike=3.40&date=2026-11-05&amount=10";
-  const nav = [["tickets", "Tickets"], ["the-index", "The Index"], ["the-house", "The House"], ["agents", "For agents"], ["fees", "Fees and limits"], ["model", "Model check"], ["onchain", "Onchain"]];
+  const nav = [["tickets", "Tickets"], ["why-onchain", "Why onchain"], ["the-index", "The Index"], ["the-house", "The House"], ["agents", "For agents"], ["fees", "Fees and limits"], ["model", "Model check"], ["onchain", "Onchain"]];
   return `<div class="pg">
     <h1>Docs</h1>
     <p class="sub">How Hourly works, in short.</p>
@@ -632,21 +678,23 @@ function docsView() {
       <section><h2 id="tickets">Tickets<small>01</small></h2>
         <ul><li><b>Ticket:</b> a floor or a cap at a strike, for one day's print.</li><li><b>One tap:</b> the same ticket, with set amounts.</li><li><b>Lock a month:</b> a floor or a cap on a month's average, for one GPU.</li></ul>
         <p>You pay the Premium up front. That is all you can lose. What it pays up to sits in escrow from the moment it trades.</p></section>
-      <section><h2 id="the-index">The Index<small>02</small></h2>
+      <section><h2 id="why-onchain">Why onchain<small>02</small></h2>
+        <p>Sources are offchain. The print, the payout rule and the collateral are onchain and can't be changed after you pay. Every contract is fully backed in escrow, so neither side needs to trust the other.</p></section>
+      <section><h2 id="the-index">The Index<small>03</small></h2>
         <p>One daily print per chip, from public rental list prices. Each print carries its method version and an input hash, so anyone can recompute it. Method <span class="tag ghost">v0 draft</span>, every print <span class="tag ghost">unsigned</span>. Not yet used to pay out any contract.</p></section>
-      <section><h2 id="the-house">The House<small>03</small></h2>
+      <section><h2 id="the-house">The House<small>04</small></h2>
         <p>The House is the other side of every ticket. Anyone can back it through the weekly vault and earn the Premium. Today every vault is <span class="tag ghost">seeded by us</span>.</p></section>
-      <section><h2 id="agents">For agents<small>04</small></h2>
+      <section><h2 id="agents">For agents<small>05</small></h2>
         <p>Agents read quotes and hand the user a link to sign. No agent can move funds.</p>
         <section class="win"><pre>GET /hourly/api/agent/brief
 GET /hourly/api/agent/prepare?${esc(ex)}
     /hourly/llms.txt</pre></section></section>
-      <section><h2 id="fees">Fees and limits<small>05</small></h2>
+      <section><h2 id="fees">Fees and limits<small>06</small></h2>
         <ul><li>Fee: ${fee / 100}% of Premium.</li><li>Fully backed in escrow, in ${COIN}.</li><li>Cap trades: up to 50 GPUs each.</li><li>Test money only. Not audited.</li></ul></section>
-      <section><h2 id="model">Model check<small>06</small></h2>
+      <section><h2 id="model">Model check<small>07</small></h2>
         <p>Pricing model against past prints, run ${st.backtest ? day(st.backtest.at.slice(0, 10)) : "n/a"}. Lower error is better. Baseline quotes every strike at half.</p>
         ${bt.length ? `<section class="win"><table class="tb"><tr><th>Horizon</th><th class="r">Prints</th><th class="r">Coverage</th><th class="r">Error</th><th class="r">Baseline</th></tr>${bt.map((r) => `<tr><td>${r.horizonDays} days</td><td class="r">${r.n}</td><td class="r">${pct(r.coverage)}</td><td class="r">${r.brier.toFixed(3)}</td><td class="r">${r.brierCoin.toFixed(3)}</td></tr>`).join("")}</table></section>` : ""}</section>
-      <section><h2 id="onchain">Onchain<small>07</small></h2>
+      <section><h2 id="onchain">Onchain<small>08</small></h2>
         <p>Solana devnet, test money only.</p>
         <section class="win"><pre><span class="c">program      </span>${esc(st.programId || "")}
 <span class="c">quote mint   </span>${esc(st.quoteMint || "")}  <span class="c">test USDC</span>
