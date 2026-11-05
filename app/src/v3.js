@@ -4,6 +4,7 @@
 import { getWallets } from "@wallet-standard/app";
 import nacl from "tweetnacl";
 import bs58 from "bs58";
+import { siteHtml, bindSite, captureRef } from "./site.js";
 
 // ---------- utils (from mac.js) ----------
 const $ = (s, el = document) => el.querySelector(s);
@@ -51,14 +52,17 @@ async function api(path, body) {
 }
 
 // ---------- state ----------
-const VIEWS = ["home", "desk", "index", "house", "docs", "access"];
+const VIEWS = ["home", "desk", "index", "debt", "house", "docs", "access"];
+// Debt lives at its own path (/debt); every other view is a hash on the app root.
+const ON_DEBT = /\/debt\/?$/.test(location.pathname);
+const BASE = location.pathname.replace(/debt\/?$/, "");
 // "portfolio" kept so old links (the Colosseum submission points at #portfolio) land on Trade, where Positions live.
 const HASH = { trade: "desk", index: "index", house: "house", docs: "docs", home: "home", access: "access", portfolio: "desk" };
 const qs0 = (() => { try { return new URLSearchParams(location.search); } catch (_) { return new URLSearchParams(); } })();
 const mode0 = ["ticket", "tap", "lock"].includes(qs0.get("mode")) ? qs0.get("mode") : null;
 const S = {
   status: null, index: [], meta: null, markets: [], vaults: [], activity: null, portfolio: null, wallet: null,
-  view: HASH[location.hash.slice(1)] || (mode0 || qs0.get("t") ? "desk" : qs0.get("cap") ? "desk" : "home"),
+  view: HASH[location.hash.slice(1)] || (ON_DEBT ? "debt" : null) || (mode0 || qs0.get("t") ? "desk" : qs0.get("cap") ? "desk" : "home"),
   mode: mode0 || (qs0.get("cap") ? "lock" : "ticket"),
   t: { gpu: "H100_SXM", side: "lower", strike: null, seriesId: null, amount: 10, quote: null, tapAmt: 5, tapDate: null },
   hedge: { gpu: "H100_SXM", role: "own", win: null, qty: 1 }, tapSide: "lower",
@@ -187,11 +191,11 @@ async function faucet() {
 
 // ---------- chrome ----------
 const COIN = '<span class="coin">USDC on Solana devnet (test)</span>';
-const go = (v) => { S.view = v; try { history.replaceState(null, "", `#${Object.keys(HASH).find((k) => HASH[k] === v) || v}`); } catch (_) { /* file */ } renderMenu(); render(); window.scrollTo(0, 0); if (v === "desk" && S.wallet) refreshPortfolio().then(() => { if (S.view === "desk" && !S.t.quote) render(); }); };
+const go = (v) => { S.view = v; try { history.replaceState(null, "", v === "debt" ? `${BASE}debt` : `${BASE}#${Object.keys(HASH).find((k) => HASH[k] === v) || v}`); } catch (_) { /* file */ } renderMenu(); render(); window.scrollTo(0, 0); if (v === "desk" && S.wallet) refreshPortfolio().then(() => { if (S.view === "desk" && !S.t.quote) render(); }); };
 // a fill can take a few seconds to show in account reads; read the portfolio again shortly after
 const refreshSoon = () => setTimeout(() => refreshPortfolio().then(() => { if (S.view === "desk" && !S.t.quote) render(); }), 4000);
 function renderMenu() {
-  const nav = [["desk", "Trade"], ["index", "Index"], ["house", "House"], ["docs", "Docs"]];
+  const nav = [["desk", "Trade"], ["index", "Index"], ["debt", "Debt"], ["house", "House"], ["docs", "Docs"]];
   const ra = S.view !== "home" && S.view !== "access";
   $("#menubar").innerHTML = `
     <button data-view="home" class="brand" aria-label="Hourly"><img src="mark.svg" alt="H">ourly</button>
@@ -249,16 +253,11 @@ function orbRing() {
   for (const a of [-1.62, 0.12, 1.6, 3.2]) t += `<line x1="${(220 + 172 * Math.cos(a)).toFixed(1)}" y1="${(220 + 172 * Math.sin(a)).toFixed(1)}" x2="${(220 + 218 * Math.cos(a)).toFixed(1)}" y2="${(220 + 218 * Math.sin(a)).toFixed(1)}" stroke="rgba(255,255,255,.75)" stroke-width="1.6"/>`;
   return `<svg viewBox="0 0 440 440" aria-hidden="true"><circle cx="220" cy="220" r="180" fill="none" stroke="rgba(255,255,255,.2)" stroke-dasharray="1 5"/>${t}</svg>`;
 }
-function homeView() {
-  return `<section class="hero">
-    <div class="orb">${orbRing()}<img src="v3/orb.png" alt="" width="272" height="272"></div>
-    <h1>Lock the price of compute.</h1>
-    <p class="hs">Next month's GPU hour, in <span class="coin">USDC on Solana devnet</span>.</p>
-    <button class="pill" data-go="access">Request access</button>
-    <span class="tag">Test money</span>
-  </section>`;
-}
-function bindHome() { $$("#desk [data-go]").forEach((b) => b.addEventListener("click", () => go(b.dataset.go))); }
+function homeView() { return siteHtml(); }
+function bindHome() { bindSite({ api, go }); }
+// Debt is loaded on demand so the home and trade bundles stay light.
+function debtView() { return '<div class="debtpg"><p class="fine">Loading.</p></div>'; }
+function bindDebt() { import("./debt.js").then((m) => { if (S.view !== "debt") return; $("#desk").innerHTML = m.debtHtml(); m.bindDebt(); }); }
 
 // ---------- request access ----------
 const ACC = { role: ["GPU owner", "Data center", "Reseller", "Renter"], chips: ["H100", "H200", "B200", "A100"], gpuCount: ["Under 64", "64 to 511", "512 to 4k", "4k plus"] };
@@ -854,10 +853,13 @@ function bindDocs() {
 // ---------- render loop ----------
 function render() {
   if (!VIEWS.includes(S.view)) S.view = "desk";
-  const views = { home: homeView, desk: deskView, index: indexView, house: houseView, docs: docsView, access: accessView };
+  document.title = S.view === "debt" ? "Hourly · Debt" : "Hourly";
+  // home and debt hold forms and a film: never rebuild them under the user
+  if ((S.view === "home" && $("#desk .site")) || (S.view === "debt" && $("#desk .debtpg"))) return;
+  const views = { home: homeView, debt: debtView, desk: deskView, index: indexView, house: houseView, docs: docsView, access: accessView };
   $("#desk").innerHTML = views[S.view]();
   document.body.dataset.view = S.view;
-  ({ home: bindHome, desk: bindDesk, index: bindIndex, house: bindHouse, docs: bindDocs, access: bindAccess })[S.view]();
+  ({ home: bindHome, debt: bindDebt, desk: bindDesk, index: bindIndex, house: bindHouse, docs: bindDocs, access: bindAccess })[S.view]();
 }
 async function refreshMarkets() {
   try { const [m, v] = await Promise.all([api("markets"), api("vaults").catch(() => [])]); S.markets = m; S.vaults = v; } catch (_) { /* keep last */ }
@@ -865,10 +867,11 @@ async function refreshMarkets() {
 async function refreshPortfolio() { if (!S.wallet) { S.portfolio = null; return; } try { S.portfolio = await api(`portfolio?owner=${S.wallet.address}`); } catch (_) { /* keep */ } }
 async function refreshActivity() { try { S.activity = await api("activity"); } catch (_) { /* keep */ } }
 window.__hourlyGo = (v, mode) => { if (mode) S.mode = mode; go(v); };
-window.addEventListener("hashchange", () => { const v = HASH[location.hash.slice(1)]; if (v && v !== S.view) { S.view = v; renderMenu(); render(); } });
+window.addEventListener("hashchange", () => { const v = HASH[location.hash.slice(1)] || (location.hash === "" && ON_DEBT ? "debt" : null); if (v && v !== S.view) { S.view = v; renderMenu(); render(); } });
 
 (async function main() {
   const rp = refParam(); if (rp) store.set("hourly.ref", rp);
+  captureRef();
   try {
     const c = JSON.parse(store.get("hourly.cleanboot") || "null");
     if (c && c.index && c.index.length) { Object.assign(S, { status: c.status, index: c.index, markets: c.markets || [], vaults: c.vaults || [], activity: c.activity }); renderMenu(); render(); }

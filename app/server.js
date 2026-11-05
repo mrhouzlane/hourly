@@ -12,6 +12,7 @@ const model = require("./engine/model");
 const market = require("./engine/market");
 const keeper = require("./engine/keeper");
 const feed = require("./engine/feed");
+const community = require("./engine/community");
 
 const PORT = Number(process.env.PORT || 7988);
 const PUBLIC = path.join(__dirname, "public");
@@ -102,19 +103,23 @@ function readBody(req, limit = 64 * 1024) {
   });
 }
 
-const MIME = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".png": "image/png", ".ico": "image/x-icon", ".json": "application/json", ".woff2": "font/woff2" };
-function serveStatic(req, res, urlPath) {
+const MIME = { ".mp4": "video/mp4", ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".png": "image/png", ".ico": "image/x-icon", ".json": "application/json", ".woff2": "font/woff2" };
+function serveStatic(req, res, urlPath, origPath = urlPath) {
   let p = decodeURIComponent(urlPath);
   if (p === "/" || p === "") p = "/index.html";
   const file = path.normalize(path.join(PUBLIC, p));
   if (!file.startsWith(PUBLIC)) return send(res, 403, "forbidden");
+  // the home film: stream with byte ranges so Safari and seeking work
+  if (path.extname(file) === ".mp4") return serveVideo(req, res, file);
   fs.readFile(file, (err, data) => {
     if (err) {
       // single page: unknown paths get the app
-      if (!path.extname(p)) return serveStatic(req, res, "/index.html");
+      if (!path.extname(p)) return serveStatic(req, res, "/index.html", urlPath);
       return send(res, 404, "not found");
     }
     const ext = path.extname(file);
+    // /debt shares the app shell; give it its own title and share card text
+    if (p === "/index.html" && /\/debt\/?$/.test(origPath)) data = Buffer.from(String(data).replace(/Hourly · Floors and caps on GPU rent/g, "Hourly · GPU debt, in the open").replace(/Every GPU on earth\. Priced by the hour\. Floors and caps on GPU rent, onchain on Solana\./g, "Public GPU loans, the rent they need, and a floor that pays out when that rent drops.").replace('content="https://hourly.markets/"', 'content="https://hourly.markets/debt"'));
     const h = { "content-type": MIME[ext] || "application/octet-stream", "cache-control": ext === ".html" ? "no-cache" : "public, max-age=300" };
     let out = data;
     if (res.__gzip && [".js", ".css", ".html", ".svg", ".json", ".ttf"].includes(ext)) {
@@ -124,6 +129,20 @@ function serveStatic(req, res, urlPath) {
     }
     res.writeHead(200, h);
     res.end(out);
+  });
+}
+
+function serveVideo(req, res, file) {
+  fs.stat(file, (err, st) => {
+    if (err) return send(res, 404, "not found");
+    const m = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || "");
+    const h = { "content-type": "video/mp4", "accept-ranges": "bytes", "cache-control": "public, max-age=86400" };
+    if (!m) { res.writeHead(200, { ...h, "content-length": st.size }); return req.method === "HEAD" ? res.end() : fs.createReadStream(file).pipe(res); }
+    let a = m[1] === "" ? Math.max(0, st.size - Number(m[2])) : Number(m[1]);
+    let b = m[1] !== "" && m[2] !== "" ? Math.min(Number(m[2]), st.size - 1) : st.size - 1;
+    if (!(a <= b) || a >= st.size) { res.writeHead(416, { "content-range": `bytes */${st.size}` }); return res.end(); }
+    res.writeHead(206, { ...h, "content-range": `bytes ${a}-${b}/${st.size}`, "content-length": b - a + 1 });
+    return req.method === "HEAD" ? res.end() : fs.createReadStream(file, { start: a, end: b }).pipe(res);
   });
 }
 
@@ -305,6 +324,19 @@ const routes = {
     log("access request", rec.company);
     return { ok: true };
   },
+  // Home page: guess today's H100 range, the Founding Tester board, and the 50 Founding GPU Owner seats (engine/community.js).
+  "POST /api/guesses": async (req, url, body, ip) => {
+    if (!allow(`gs:${ip}`, 20, 3_600_000)) throw venue.httpError(429, "Too many requests. Try again in an hour.");
+    return community.addGuess(body, ip);
+  },
+  "GET /api/board": async (req, url) => community.board(url.searchParams.get("day")),
+  "POST /api/seats": async (req, url, body, ip) => {
+    if (!allow(`st:${ip}`, 5, 3_600_000)) throw venue.httpError(429, "Too many requests. Try again in an hour.");
+    const out = await community.addSeat(body, ip);
+    log("seat request", String(body && body.company).slice(0, 60));
+    return out;
+  },
+  "GET /api/seats/count": async () => community.seatCount(),
   "POST /api/faucet": async (req, url, body, ip) => {
     if (venue.CLUSTER === "mainnet") throw venue.httpError(404, "There is no faucet on mainnet.");
     let owner;
