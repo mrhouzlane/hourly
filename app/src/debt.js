@@ -10,13 +10,15 @@ export function debtHtml() {
   <section id="tracker">
     <div class="sh"><span><span class="dots"><b></b><b></b><b></b></span>Public GPU deal tracker</span><span class="r">Updated <span id="updated">Thu Nov 5, 2026</span></span></div>
     <div class="sb">
-      <div class="stats">
-        <div>Loans tracked<b id="s-n">0</b></div>
-        <div>Signed sizes disclosed<b id="s-sum">$0</b></div>
-        <div>Loan terms<b>3 to 6 years</b></div>
-        <div>Rental contracts<b>12 to 36 months</b></div>
+      <div class="tiles">
+        <div><em>Signed sizes disclosed</em><b id="s-sum">$0</b><small>Facility sizes as announced, not drawn</small></div>
+        <div><em>Loans tracked</em><b id="s-n">0</b><small>Public sources, linked on every loan</small></div>
+        <div><em>Typical terms</em><b>Loans 3 to 6 years</b><small>Rentals 12 to 36 months</small></div>
       </div>
+      <h3 class="lh">Largest deals</h3>
       <div class="cards" id="cards"></div>
+      <div id="more" class="cards more" hidden></div>
+      <div class="seeall"><button type="button" class="toggle" id="btn-more" aria-expanded="false" aria-controls="more">See all <span id="n-all">14</span> loans</button></div>
       <div class="toolbar">
         <button type="button" class="toggle" id="btn-all" aria-expanded="false">Show all data</button>
         <p class="fine" style="margin:0">Sizes are facility sizes as announced, not amounts drawn. Credit: <a href="https://www.amcompute.com/gpu-financing-tracker" target="_blank" rel="noopener">American Compute</a>.</p>
@@ -27,6 +29,22 @@ export function debtHtml() {
           <tbody id="allbody"></tbody>
         </table></div>
       </div>
+    </div>
+  </section>
+
+  <section id="wall">
+    <div class="sh"><span><span class="dots"><b></b><b></b><b></b></span>Maturity wall</span><span class="r">Years from signing</span></div>
+    <div class="sb">
+      <p class="note">Loans run longer than the rental contracts that repay them. The gap is rent price risk Hourly floors cover.</p>
+      <div class="legend">
+        <span><i style="border:1px solid #fff"></i>Loan term</span>
+        <span><i style="background:#fff"></i>Rental contract, stated</span>
+        <span><i style="background:repeating-linear-gradient(90deg,rgba(255,255,255,.75) 0 3px,rgba(255,255,255,.35) 3px 6px)"></i>Rental, typical 12 to 36 months</span>
+        <span><i style="background:var(--gap);border:1px solid rgba(255,255,255,.4)"></i>Rent price risk Hourly floors cover</span>
+      </div>
+      <div class="wall" id="wallrows"></div>
+      <div class="wall"><span></span><div class="axis" id="axis"></div></div>
+      <p class="fine" style="margin-top:12px">CoreWeave states customer contracts average about 3 years (<a href="https://investors.coreweave.com/news/news-details/2026/CoreWeave-Closes-2-6-Billion-Loan-Facility-Expanding-Financing-Flexibility-for-AI-Infrastructure/default.aspx" target="_blank" rel="noopener">DDTL 5.5</a>). Other rows use the typical 12 to 36 month range. Only loans with a public maturity are drawn.</p>
     </div>
   </section>
 
@@ -70,22 +88,6 @@ export function debtHtml() {
       </div>
     </section>
   </div>
-
-  <section id="wall">
-    <div class="sh"><span><span class="dots"><b></b><b></b><b></b></span>Maturity wall</span><span class="r">Years from signing</span></div>
-    <div class="sb">
-      <p class="note">Loans run longer than the rental contracts that repay them. The gap is rent price risk Hourly floors cover.</p>
-      <div class="legend">
-        <span><i style="border:1px solid #fff"></i>Loan term</span>
-        <span><i style="background:#fff"></i>Rental contract, stated</span>
-        <span><i style="background:repeating-linear-gradient(90deg,rgba(255,255,255,.75) 0 3px,rgba(255,255,255,.35) 3px 6px)"></i>Rental, typical 12 to 36 months</span>
-        <span><i style="background:var(--gap);border:1px solid rgba(255,255,255,.4)"></i>Rent price risk Hourly floors cover</span>
-      </div>
-      <div class="wall" id="wallrows"></div>
-      <div class="wall"><span></span><div class="axis" id="axis"></div></div>
-      <p class="fine" style="margin-top:12px">CoreWeave states customer contracts average about 3 years (<a href="https://investors.coreweave.com/news/news-details/2026/CoreWeave-Closes-2-6-Billion-Loan-Facility-Expanding-Financing-Flexibility-for-AI-Infrastructure/default.aspx" target="_blank" rel="noopener">DDTL 5.5</a>). Other rows use the typical 12 to 36 month range. Only loans with a public maturity are drawn.</p>
-    </div>
-  </section>
 
   <div class="dcta">
     <h2>GPU owner or lender?</h2>
@@ -155,7 +157,7 @@ export function debtHtml() {
 export function bindDebt() {
 
 const TODAY = new Date();
-const CAPEX=35000, LTV=0.75, MONTHS_LOAN=36, OPS=0.41, UTIL=0.70, REF_RENT=2.50, ILL_RATE=9.5;
+const CAPEX=35000, LTV=0.75, MONTHS_LOAN=36, OPS=0.41, UTIL=0.70, REF_RENT=2.50, ILL_RATE=9.47;
 const LOAN = CAPEX * LTV;
 const HRS_MO = 8760 * UTIL / 12;
 
@@ -202,9 +204,8 @@ function cardHTML(d){
   const rate=d.rateLbl;
   const until=d.untilLbl;
   const pct=progress(d);
-  const rateUsed = rate ? esc(rate) : `~${ILL_RATE}% <span style="opacity:.7">(illustration)</span>`;
   let meta="";
-  if(rate || !d.rateLbl) meta += `<div><em>Rate</em>${rateUsed}</div>`;
+  if(rate) meta += `<div><em>Rate</em>${esc(rate)}</div>`;
   if(until) meta += `<div><em>Repaying until</em>${esc(until)}</div>`;
   else if(d.chip) meta += `<div><em>Chip</em>${esc(d.chip)}</div>`;
   let prog="";
@@ -230,7 +231,15 @@ function cardHTML(d){
 }
 
 const cardsEl=document.getElementById("cards");
-cardsEl.innerHTML = DEALS.map(cardHTML).join("");
+const TOP = DEALS.filter(d=>!d.agg && d.size).sort((a,b)=>b.size-a.size).slice(0,3);
+cardsEl.innerHTML = TOP.map(cardHTML).join("");
+document.getElementById("more").innerHTML = DEALS.filter(d=>!TOP.includes(d)).map(cardHTML).join("");
+document.getElementById("n-all").textContent = DEALS.length;
+document.getElementById("btn-more").onclick=function(){
+  const box=document.getElementById("more"), open=box.hidden;
+  box.hidden=!open; this.setAttribute("aria-expanded", String(open)); this.classList.toggle("on", open);
+  this.innerHTML = open ? "Show the 3 largest only" : `See all <span id="n-all">${DEALS.length}</span> loans`;
+};
 const named=DEALS.filter(d=>!d.agg);
 document.getElementById("s-n").textContent = named.length + " + onchain";
 document.getElementById("s-sum").textContent = "$" + Math.round(named.reduce((a,d)=>a+(d.size||0),0)) + "B";
@@ -287,14 +296,15 @@ window.setIndexRange=setIndexRange;
 
 // Maturity wall
 const MAXY=6, rows=DEALS.filter(d=>d.y);
-document.getElementById("wallrows").innerHTML = rows.map(d=>{
+document.getElementById("wallrows").innerHTML = rows.map((d,i)=>{
+  const gl = i===0 ? `<span class="gl">Rent price risk Hourly floors cover</span>` : "";
   const pct=v=>(v/MAXY*100).toFixed(2)+"%";
   const lb=`${esc(d.b)}<small>${esc(d.facility||'')} · ${usd(d.size)||''}</small>`;
   let inner;
   if(d.cy){
-    inner=`<div class="c" style="width:${pct(d.cy)}"></div><div class="g" style="left:${pct(d.cy)};width:${pct(d.y-d.cy)}"></div>`;
+    inner=`<div class="c" style="width:${pct(d.cy)}"></div><div class="g" style="left:${pct(d.cy)};width:${pct(d.y-d.cy)}">${gl}</div>`;
   } else {
-    inner=`<div class="c" style="width:${pct(1)}"></div><div class="cr" style="left:${pct(1)};width:${pct(Math.min(3,d.y)-1)}"></div>`+(d.y>3?`<div class="g" style="left:${pct(3)};width:${pct(d.y-3)}"></div>`:'');
+    inner=`<div class="c" style="width:${pct(1)}"></div><div class="cr" style="left:${pct(1)};width:${pct(Math.min(3,d.y)-1)}"></div>`+(d.y>3?`<div class="g" style="left:${pct(3)};width:${pct(d.y-3)}">${gl}</div>`:'');
   }
   return `<div class="lb">${lb}</div><div class="barw" title="Loan about ${d.y.toFixed(1)} years">${inner}<div class="ln" style="width:${pct(d.y)}"></div><span class="t">loan ${d.y.toFixed(1)}y</span></div>`;
 }).join("");
@@ -603,7 +613,7 @@ document.getElementById("sim-dl").onclick=()=>{
   downloadCanvas(`hourly-floor-${lastSim.deal.id}.png`);
 };
 
-cardsEl.addEventListener("click", e=>{
+document.getElementById("tracker").addEventListener("click", e=>{
   const simBtn=e.target.closest("[data-sim]");
   const shareBtn=e.target.closest("[data-share]");
   if(simBtn){ const d=DEALS.find(x=>x.id===simBtn.dataset.sim); if(d) openSim(d); }
