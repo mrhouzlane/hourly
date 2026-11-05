@@ -3,79 +3,28 @@
 export function siteHtml() {
   return `<div class="site">
 
-  <section class="panel" id="seats">
-    <div class="sh"><span><span class="dots"><b></b><b></b><b></b></span>Devnet beta</span><span class="r">GPU owners</span></div>
-    <div class="sb">
-      <h2>If you own GPUs, do this.</h2>
-      <p class="note">Request one of 50 Founding GPU Owner seats. The site stays open to everyone with test money; the seats are a perk, not a gate.</p>
-      <div class="seats-grid">
-        <div>
-          <div class="seat-stat">
-            <div class="kick" style="margin-bottom:10px">Seats claimed</div>
-            <div class="sbig"><span id="seats-claimed"></span><small> / 50</small></div>
-            <p class="fine" style="margin:12px 0 0">Counter starts at zero. Fills from real requests only.</p>
-          </div>
-          <ul class="perk" style="margin-top:14px">
-            <li><b>Priority on mainnet</b> when it opens</li>
-            <li><b>Direct line</b> to the Hourly team</li>
-            <li><b>Name on the board</b> as a Founding GPU Owner</li>
-          </ul>
-        </div>
-        <div>
-          <form id="seat-form" novalidate>
-            <div class="field">
-              <label for="s-name">Name</label>
-              <input id="s-name" name="name" type="text" maxlength="80" required placeholder="Your name">
-            </div>
-            <div class="field">
-              <label for="s-co">Company</label>
-              <input id="s-co" name="company" type="text" maxlength="80" required placeholder="Company or project">
-            </div>
-            <div class="field">
-              <label for="s-gpus">GPUs owned</label>
-              <select id="s-gpus" name="gpus" required style="width:100%;background:var(--panel-2);border:1px solid var(--line);padding:12px 14px;font:600 14px/1.2 var(--mono);color:#fff">
-                <option value="">Select a range</option>
-                <option>Under 64</option>
-                <option>64 to 511</option>
-                <option>512 to 4k</option>
-                <option>4k plus</option>
-              </select>
-            </div>
-            <div class="field">
-              <label for="s-email">Email <span style="color:var(--mute);text-transform:none;letter-spacing:0">(optional)</span></label>
-              <input id="s-email" name="email" type="email" maxlength="120" placeholder="you@company.com">
-            </div>
-            <div class="guess-acts">
-              <button type="submit" class="pri">Request a seat</button>
-              <a href="#access">Full access form</a>
-            </div>
-            <p class="err" id="s-err" role="alert"></p>
-            <div class="okmsg" id="s-ok">Request received. We will be in touch.</div>
-          </form>
-        </div>
-      </div>
-    </div>
-  </section>
-  <section class="panel" id="hero">
-    <div class="sh"><span><span class="dots"><b></b><b></b><b></b></span>Same H100, same hour</span><span class="r">Illustration</span></div>
-    <div class="sb">
-      <div class="price-row" aria-label="Same H100, same hour, two public list prices">
-        <div class="price">$1.99<small>Same H100</small></div>
-        <div class="vs">or</div>
-        <div class="price alt">$12.29<small>Same hour</small></div>
-      </div>
-      <p class="fine" style="margin:0">Illustration · public listings. GPU rent has no price anyone agrees on.</p>
-      <div class="cta-row">
-        <a class="pill" href="#trade" id="cta-try">Try with test money</a>
-        <a class="pill ghost" href="#guess">Guess today's range</a>
-      </div>
-    </div>
+  <section class="seats2" id="seats">
+    <div class="kick">Devnet beta · GPU owners</div>
+    <h2>If you own GPUs, do this.</h2>
+    <p class="lede">Request one of 50 Founding GPU Owner seats. The site stays open to everyone with test money; the seats are a perk, not a gate.</p>
+    <div class="count"><b id="seats-claimed"></b><span>of 50 seats claimed</span></div>
+    <ul class="perks"><li>Priority on mainnet when it opens</li><li>Direct line to the Hourly team</li><li>Name on the Founding board</li></ul>
+    <form id="seat-form" class="inline" novalidate>
+      <label><span>Name</span><input id="s-name" name="name" type="text" maxlength="80" required placeholder="Your name" autocomplete="name"></label>
+      <label><span>Company</span><input id="s-co" name="company" type="text" maxlength="80" required placeholder="Company or project" autocomplete="organization"></label>
+      <label><span>GPUs owned</span><select id="s-gpus" name="gpus" required><option value="">Select a range</option><option>Under 64</option><option>64 to 511</option><option>512 to 4k</option><option>4k plus</option></select></label>
+      <label><span>Email, optional</span><input id="s-email" name="email" type="email" maxlength="120" placeholder="you@company.com" autocomplete="email"></label>
+      <button type="submit" class="go">Request a seat</button>
+      <p class="err" id="s-err" role="alert"></p>
+      <div class="okmsg" id="s-ok">Request received. We will be in touch.</div>
+    </form>
+    <p class="fine">Counter fills from real requests only. Need more room? Use the <a href="#access">full access form</a>.</p>
   </section>
   <section class="panel" id="guess">
     <div class="sh"><span><span class="dots"><b></b><b></b><b></b></span>Guess today's H100 range</span><span class="r">No email needed</span></div>
     <div class="sb">
       <h2>Guess today's H100 range.</h2>
-      <p class="note">Enter a Low and a High. Closest to the next published Index range joins the Founding Tester board.</p>
+      <p class="note">Enter a Low and a High. Closest to the next published Index range joins the Hourly Founding Board.</p>
       <div class="guess-grid">
         <div>
           <form id="guess-form" novalidate>
@@ -113,7 +62,7 @@ export function siteHtml() {
           <ol>
             <li>You submit a Low and a High for today's H100 print.</li>
             <li>At the next Index print we score how close your band sits to the published Low and High.</li>
-            <li>Closest guessers join the Founding Tester board.</li>
+            <li>Closest guessers join the Hourly Founding Board.</li>
             <li>Reveal shows here as <b style="color:#fff">Revealed at next print</b> until that print is public.</li>
           </ol>
           <p class="fine" style="margin-top:14px">Stored with the time you sent it. No email, no wallet.</p>
@@ -122,56 +71,15 @@ export function siteHtml() {
     </div>
   </section>
   <section class="panel" id="board">
-    <div class="sh"><span><span class="dots"><b></b><b></b><b></b></span>Founding Tester board</span><span class="r">Public · real entries only</span></div>
+    <div class="sh"><span><span class="dots"><b></b><b></b><b></b></span>Hourly Founding Board</span><span class="r">Real entries only</span></div>
     <div class="sb">
-      <div class="board">
-        <div class="board-empty" id="board-empty">
-          <h3>Be the first</h3>
-          <p>No scored guesses yet. Submit a range above and come back after the next print.</p>
-        </div>
-        <div class="board-rows" aria-hidden="true">
-          <div class="brow"><span class="rank">1</span><div class="skel"></div><div class="skel short"></div></div>
-          <div class="brow"><span class="rank">2</span><div class="skel"></div><div class="skel short"></div></div>
-          <div class="brow"><span class="rank">3</span><div class="skel"></div><div class="skel short"></div></div>
-          <div class="brow"><span class="rank">4</span><div class="skel"></div><div class="skel short"></div></div>
-          <div class="brow"><span class="rank">5</span><div class="skel"></div><div class="skel short"></div></div>
-          <div class="brow"><span class="rank">6</span><div class="skel"></div><div class="skel short"></div></div>
-        </div>
-      </div>
+      <table class="lb">
+        <thead><tr><th>Rank</th><th>Tester</th><th>Guess</th><th class="r">Off by</th></tr></thead>
+        <tbody id="board-rows"><tr class="none"><td colspan="4"><b>Be the first.</b> No scored guesses yet. Guess today's range above; the closest are ranked here after the next print.</td></tr></tbody>
+      </table>
+      <p class="fine" id="board-note" style="margin:12px 0 0">Ranked by how far each Low and High sits from the published range. Lower is better.</p>
     </div>
   </section>
-  <section class="panel" id="debt">
-    <div class="sh"><span><span class="dots"><b></b><b></b><b></b></span>Hourly Debt</span><span class="r">Public tracker</span></div>
-    <div class="sb">
-      <div class="teaser">
-        <div class="left">
-          <h2>GPU debt, in the open.</h2>
-          <p class="note" style="margin-bottom:0">Public GPU loans, the rent they need, and a floor that pays out when that rent drops. Floors are bought and pay out in USDC on Solana.</p>
-          <div class="minis">
-            <span>Deal cards</span>
-            <span>Breakeven rent</span>
-            <span>Floor simulator</span>
-            <span>Maturity wall</span>
-          </div>
-        </div>
-        <a class="pill" href="debt" data-debt>Open Debt page</a>
-      </div>
-    </div>
-  </section>
-
-  <div class="foot-extra">
-    <div class="built">
-      <span>Built on</span>
-      <svg width="18" height="14" viewBox="0 0 100 80" aria-hidden="true"><defs><linearGradient id="sg" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#9945FF"/><stop offset="1" stop-color="#14F195"/></linearGradient></defs><g fill="url(#sg)"><path d="M18 0h82L82 18H0z"/><path d="M0 31h82l18 18H18z"/><path d="M18 62h82L82 80H0z"/></g></svg>
-      <span style="color:#fff;font-weight:600">Solana</span>
-      <span style="opacity:.5">·</span>
-      <span>Test money</span>
-    </div>
-    <div class="socials">
-      <a href="https://x.com/hourly_markets" target="_blank" rel="noopener">@hourly_markets</a>
-      <a href="#docs">Docs</a>
-    </div>
-  </div>
   <canvas id="share-canvas" class="share-preview" width="1200" height="675"></canvas>
 </div>`;
 }
@@ -226,7 +134,7 @@ function xIntent(low, high) {
 
 function boardHtml(b) {
   if (!b || !b.revealed || !b.rows || !b.rows.length) return null;
-  return b.rows.map((r) => `<div class="brow"><span class="rank">${r.rank}</span><span style="color:#fff">${r.x ? r.x.replace(/[<>&"]/g, "") : "Anonymous"}</span><span>$${money(r.low)} to $${money(r.high)}</span></div>`).join("");
+  return b.rows.map((r) => `<tr><td>${r.rank}</td><td>${r.x ? r.x.replace(/[<>&"]/g, "") : "Anonymous"}</td><td>$${money(r.low)} to $${money(r.high)}</td><td class="r">$${money(r.score)}</td></tr>`).join("");
 }
 
 // api: the v3 api() helper; go: the v3 router.
@@ -265,7 +173,8 @@ export function bindSite({ api, go }) {
   // board: real scored rows only, after the print is public
   api("board").then((b) => {
     const html = boardHtml(b);
-    if (html) { $("#board-empty").style.display = "none"; const rows = root.querySelector(".board-rows"); rows.innerHTML = html; rows.removeAttribute("aria-hidden"); }
+    if (html) $("#board-rows").innerHTML = html;
+    else if (b && b.guesses) $("#board-note").textContent = `${b.guesses} guess${b.guesses > 1 ? "es" : ""} in for ${b.day}. Revealed at next print.`;
   }).catch(() => {});
 
   // seats: live count, never hard coded

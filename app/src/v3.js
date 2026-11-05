@@ -258,8 +258,6 @@ function homeView() {
   return `<section class="hero">
     <div class="orb">${orbRing()}<img src="v3/orb.png" alt="" width="272" height="272"></div>
     <h1>Lock the price of compute.</h1>
-    <p class="hs">Next month's GPU hour, in <span class="coin">USDC on Solana devnet</span>.</p>
-    <button class="pill" data-seats>Request access</button>
     <span class="tag">Test money</span>
   </section>${siteHtml()}`;
 }
