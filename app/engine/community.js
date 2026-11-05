@@ -87,7 +87,7 @@ async function addSeat(body, ip) {
   if (!rec.name) missing.push("name");
   if (!rec.gpus) missing.push("gpus");
   if (rec.email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(rec.email)) missing.push("email");
-  if (missing.length) { const e = httpError(400, "Name and GPUs owned are required. Email is optional but must be valid."); e.fields = missing; throw e; }
+  if (missing.length) { const e = httpError(400, "Name and GPUs you run are required. Email is optional but must be valid."); e.fields = missing; throw e; }
   await append(F.seats, rec);
   seats.push(rec);
   // Also into the existing Request access inbox, so nothing is lost.
