@@ -82,7 +82,7 @@ function board(day) {
 
 // ---------- seats ----------
 async function addSeat(body, ip) {
-  const rec = { at: new Date().toISOString(), name: str(body && body.name, 80), company: str(body && body.company, 80), gpus: GPU_RANGES.includes(body && body.gpus) ? body.gpus : "", email: str(body && body.email, 120), ref: cleanRef(body && body.ref), ip: ipHash(ip) };
+  const rec = { at: new Date().toISOString(), name: str(body && body.name, 80), company: str(body && body.company, 80), gpus: GPU_RANGES.includes(body && body.gpus) ? body.gpus : "", email: str(body && body.email, 120), show: body && body.show === true, ref: cleanRef(body && body.ref), ip: ipHash(ip) };
   const missing = [];
   if (!rec.name) missing.push("name");
   if (!rec.company) missing.push("company");
@@ -101,6 +101,22 @@ function seatCount() {
   return { claimed: Math.min(claimed, SEATS_TOTAL), total: SEATS_TOTAL, waitlist: Math.max(0, claimed - SEATS_TOTAL) };
 }
 
+// ---------- Hourly Founding Board ----------
+// A company is listed only if it ticked "Show my company" AND the Hourly team approved it
+// (one company name per line in state/founders-approved.txt, added with scripts/approve-founder.js).
+function approved() {
+  try { return new Set(fs.readFileSync(path.join(STATE, "founders-approved.txt"), "utf8").split("\n").map((l) => l.trim().toLowerCase()).filter(Boolean)); } catch (_) { return new Set(); }
+}
+function founders() {
+  const ok = approved(), seen = new Set(), rows = [];
+  for (const s of seats) {
+    const k = s.company.toLowerCase().replace(/\s+/g, " ");
+    if (!s.show || !ok.has(k) || seen.has(k)) continue;
+    seen.add(k); rows.push({ company: s.company, gpus: s.gpus, day: s.at.slice(0, 10) });
+  }
+  return { rows: rows.slice(0, SEATS_TOTAL) };
+}
+
 // ---------- admin: counts by ref (read from the files, for scripts/refs.js) ----------
 function byRef() {
   const out = {};
@@ -110,4 +126,4 @@ function byRef() {
   return out;
 }
 
-module.exports = { addGuess, board, addSeat, seatCount, byRef, band80 };
+module.exports = { addGuess, board, addSeat, seatCount, founders, byRef, band80 };

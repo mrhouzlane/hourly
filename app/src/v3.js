@@ -253,12 +253,10 @@ function orbRing() {
   for (const a of [-1.62, 0.12, 1.6, 3.2]) t += `<line x1="${(220 + 172 * Math.cos(a)).toFixed(1)}" y1="${(220 + 172 * Math.sin(a)).toFixed(1)}" x2="${(220 + 218 * Math.cos(a)).toFixed(1)}" y2="${(220 + 218 * Math.sin(a)).toFixed(1)}" stroke="rgba(255,255,255,.75)" stroke-width="1.6"/>`;
   return `<svg viewBox="0 0 440 440" aria-hidden="true"><circle cx="220" cy="220" r="180" fill="none" stroke="rgba(255,255,255,.2)" stroke-dasharray="1 5"/>${t}</svg>`;
 }
-// The original hero stays on top; the site v3 sections follow it.
+// The orb on top; the Founding GPU Owner seats sit directly under it.
 function homeView() {
   return `<section class="hero">
     <div class="orb">${orbRing()}<img src="v3/orb.png" alt="" width="272" height="272"></div>
-    <h1>Lock the price of compute.</h1>
-    <span class="tag">Test money</span>
   </section>${siteHtml()}`;
 }
 function bindHome() {

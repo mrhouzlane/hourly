@@ -337,6 +337,7 @@ const routes = {
     return out;
   },
   "GET /api/seats/count": async () => community.seatCount(),
+  "GET /api/founders": async () => community.founders(),
   "POST /api/faucet": async (req, url, body, ip) => {
     if (venue.CLUSTER === "mainnet") throw venue.httpError(404, "There is no faucet on mainnet.");
     let owner;
