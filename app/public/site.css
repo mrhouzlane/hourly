@@ -219,15 +219,28 @@
   .site .how2{grid-template-columns:1fr}
 }
 
-/* recorded: the check draws itself, the number counts up, the seat line pulses */
-.site .done .tick2{width:56px;height:56px}
-.site .done .tick2 .ring{fill:#fff;stroke:#fff;stroke-width:2;stroke-dasharray:158;stroke-dashoffset:158;animation:draw .55s ease-out forwards,fillin .25s ease-out .45s both}
-.site .done .tick2 .mark{fill:none;stroke:var(--blue);stroke-width:4;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:34;stroke-dashoffset:34;animation:draw .35s ease-out .55s forwards}
-.site .done b{animation:rise .4s ease .5s both}
-.site .done p{animation:rise .4s ease .65s both}
-.site .done #s-num{font-variant-numeric:tabular-nums}
+/* recorded: the ledger moment (types, slots light up to your seat, the number rolls in) */
+.site .done{width:min(560px,100%);margin-top:26px;align-items:stretch;text-align:center}
+.site .done .recline{font:500 12px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--soft)}
+.site .done .recline .cur{display:inline-block;width:7px;height:12px;margin-left:4px;background:#fff;vertical-align:-1px;animation:blink 1s steps(1) infinite}
+.site .done.s2 .recline{color:#fff}
+.site .done .slots{display:grid;grid-template-columns:repeat(50,1fr);gap:3px;height:22px;margin-top:16px;opacity:0;transform:scaleX(.96);transition:opacity .35s,transform .45s cubic-bezier(.2,.7,.2,1)}
+.site .done.s1 .slots{opacity:1;transform:none}
+.site .done .slots i{background:rgba(255,255,255,.14);transition:background .25s,box-shadow .25s,transform .25s}
+.site .done .slots i.on{background:rgba(255,255,255,.75)}
+.site .done .slots i.me{background:#fff;box-shadow:0 0 14px 2px rgba(255,255,255,.75);transform:scaleY(1.35);animation:glow 1.6s ease-in-out .3s infinite}
+.site .done .seatno{display:flex;align-items:baseline;justify-content:center;gap:12px;margin-top:22px;opacity:0;transform:translateY(10px);transition:opacity .4s,transform .5s cubic-bezier(.2,.7,.2,1)}
+.site .done.s3 .seatno{opacity:1;transform:none}
+.site .done .seatno .lbl{font:500 12px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase;color:var(--soft)}
+.site .done .seatno b{margin:0;font:700 88px/1 var(--head);letter-spacing:-.04em;font-variant-numeric:tabular-nums}
+.site .done .seatno .of{font:600 24px/1 var(--head);color:var(--soft)}
+.site .done .meta,.site .done .sub3{margin:10px 0 0;opacity:0;transition:opacity .5s}
+.site .done .meta{font:500 12px/1.4 var(--mono);letter-spacing:.06em;color:#fff}
+.site .done .sub3{color:var(--soft);font:400 17px/1.4 var(--sans)}
+.site .done.s4 .meta{opacity:1}.site .done.s4 .sub3{opacity:1;transition-delay:.2s}
 .site .seatline.bump{animation:bump .9s ease}
-@keyframes draw{to{stroke-dashoffset:0}}
-@keyframes fillin{from{fill:transparent}to{fill:#fff}}
+@keyframes glow{50%{box-shadow:0 0 22px 4px rgba(255,255,255,.95)}}
+@keyframes blink{50%{opacity:0}}
 @keyframes bump{0%{transform:scale(1);text-shadow:none}30%{transform:scale(1.12);text-shadow:0 0 18px rgba(255,255,255,.7)}100%{transform:scale(1);text-shadow:none}}
-@media (prefers-reduced-motion:reduce){.site .done .tick2 .ring,.site .done .tick2 .mark{animation:none;stroke-dashoffset:0}.site .done b,.site .done p,.site .seatline.bump{animation:none}}
+@media (prefers-reduced-motion:reduce){.site .done *{transition:none!important;animation:none!important}.site .seatline.bump{animation:none}}
+@media (max-width:640px){.site .done .slots{gap:2px;height:18px}.site .done .seatno b{font-size:68px}}
