@@ -292,3 +292,9 @@
 .site .seats2 .perks{margin:28px 0 0}
 .site .hero{padding-bottom:20px}
 @media (max-width:760px){.site .seats2 .count b{font-size:96px}.site .seats2 .count span{font-size:32px}}
+/* smaller orb on the home hero */
+.hero .orb{width:300px;height:300px}
+.hero .orb img{width:186px;height:186px}
+.hero{padding-top:22px}
+@media (max-width:760px){.hero .orb{width:240px;height:240px}.hero .orb img{width:148px;height:148px}}
+.hero{padding-bottom:0}.site .seats2{margin-top:-8px}
