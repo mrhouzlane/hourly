@@ -253,9 +253,9 @@ function orbRing() {
   for (const a of [-1.62, 0.12, 1.6, 3.2]) t += `<line x1="${(220 + 172 * Math.cos(a)).toFixed(1)}" y1="${(220 + 172 * Math.sin(a)).toFixed(1)}" x2="${(220 + 218 * Math.cos(a)).toFixed(1)}" y2="${(220 + 218 * Math.sin(a)).toFixed(1)}" stroke="rgba(255,255,255,.75)" stroke-width="1.6"/>`;
   return `<svg viewBox="0 0 440 440" aria-hidden="true"><circle cx="220" cy="220" r="180" fill="none" stroke="rgba(255,255,255,.2)" stroke-dasharray="1 5"/>${t}</svg>`;
 }
-// Home: the orb and the Founding GPU Owner seats on the left, the Hourly Founding Board on the right.
+// Home: hero v2, one centred column with a single action (Request a seat).
 function homeView() {
-  return siteHtml(`${orbRing()}<img src="v3/orb.png" alt="" width="272" height="272">`);
+  return siteHtml();
 }
 function bindHome() {
   $$("#desk [data-go]").forEach((b) => b.addEventListener("click", () => go(b.dataset.go)));
