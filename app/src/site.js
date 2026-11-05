@@ -1,7 +1,7 @@
 // Home, hero v2 (reference: ~/hourly-site-v3/ref-hero2/h1d, h2d, h3d): one centred column, one action.
 // Closed: kicker, headline, subline, Request a seat, See how it works, seat line, three chips.
 // Open: the seat line stays and a compact form replaces the button, link and chips. Done: a check and "Seat requested."
-// Below: how it works in three steps, then the Hourly Founding Board, shown only once it has entries.
+// Below: the Hourly Founding Board, shown only once it has entries. See how it works opens Docs.
 // Backend: /api/seats, /api/seats/count, /api/founders. No index numbers are shown here while the hold is on.
 export const SEATS_TOTAL = 50;
 
@@ -13,7 +13,7 @@ export function siteHtml() {
     <p class="sub2">Paid out in USDC on Solana. Devnet beta, test money.</p>
     <div class="cta2" id="cta2">
       <button type="button" class="pill2" id="open-seat">Request a seat</button>
-      <a class="how-link" href="#how" id="how-link">See how it works ↓</a>
+      <a class="how-link" href="#docs" id="how-link">See how it works</a>
     </div>
     <div class="seatline"><span id="seats-claimed">0</span> of ${SEATS_TOTAL} seats claimed</div>
     <ul class="chips2" id="chips2"><li>Early access</li><li>Floor quote on your fleet</li><li>Founding fees</li></ul>
@@ -30,12 +30,6 @@ export function siteHtml() {
       </form>
     </div>
     <div class="done" id="s-ok" role="status" hidden><span class="tick" aria-hidden="true">✓</span><b>Seat requested.</b><p>We'll reach out within a week.</p></div>
-  </section>
-
-  <section class="how2" id="how">
-    <div class="step"><span>01</span><h3>Request a seat</h3><p>Tell us how many GPUs you run.</p></div>
-    <div class="step"><span>02</span><h3>Get a floor quote</h3><p>A floor on your fleet's rent, with its Premium.</p></div>
-    <div class="step"><span>03</span><h3>Paid out onchain</h3><p>If rent drops below your floor, it pays out in USDC.</p></div>
   </section>
 
   <section class="win board2" id="board" hidden>
@@ -71,7 +65,6 @@ export function bindSite({ api }) {
   const count = () => api("seats/count").then((c) => { $("#seats-claimed").textContent = String(c.claimed); }).catch(() => {});
   count();
 
-  $("#how-link").addEventListener("click", (e) => { e.preventDefault(); $("#how").scrollIntoView({ behavior: "smooth" }); });
 
   // one action: the button opens the form; the button, link and chips step aside
   $("#open-seat").addEventListener("click", () => {
