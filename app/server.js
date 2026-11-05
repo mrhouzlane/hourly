@@ -52,6 +52,7 @@ function runBacktest() {
 }
 
 // ---------- index summary ----------
+const INDEX_PUBLIC = () => process.env.INDEX_PUBLIC === "true";
 async function indexSummary() {
   const out = [];
   for (const [code, g] of Object.entries(ornn.GPUS)) {
@@ -153,8 +154,7 @@ const routes = {
   "GET /api/status": async () => {
     let cfg = null, rpcError = null;
     try { cfg = await venue.readConfig(); } catch (e) { rpcError = e.message; }
-    return {
-      cluster: venue.CLUSTER,
+    return { indexPublic: INDEX_PUBLIC(),       cluster: venue.CLUSTER,
       rpcOk: !rpcError,
       rpcError,
       crossbar: keeper.CROSSBAR_URL,
@@ -179,7 +179,8 @@ const routes = {
     };
   },
 
-  "GET /api/index": async () => indexSummary(),
+  // Index hold: until INDEX_PUBLIC=true, the Hourly Index numbers stay on the server (chip names only).
+  "GET /api/index": async () => (INDEX_PUBLIC() ? indexSummary() : (await indexSummary()).map((g) => ({ code: g.code, label: g.label, hold: true }))),
   "GET /api/index/meta": async () => {
     const base = process.env.INDEX_API || "http://127.0.0.1:7991";
     const j = (p) => fetch(base + p, { signal: AbortSignal.timeout(8000) }).then((r) => r.json());
@@ -203,6 +204,8 @@ const routes = {
     const days = data.chips[gpu];
     if (!days) throw venue.httpError(404, "unknown chip");
     const pc = posts.chips[gpu] || {};
+    // Hold: days and whether a print exists, nothing else (each onchain memo carries the value, so no links either).
+    if (!INDEX_PUBLIC()) return { gpu, hold: true, days: days.map((d) => ({ day: d.day, printed: d.value !== null && d.value !== undefined })) };
     return { gpu, method: data.method, publisher: posts.publisher || null, cluster: venue.CLUSTER,
       // Range: Low and High = 25th and 75th percentile of the per-source values (linear interpolation, before clamping); Mid = the print.
       days: days.map((d) => ({ ...d, range: rangeOf(d.providers, d.value), post: pc[d.day] ? { sig: pc[d.day].sig, slot: pc[d.day].slot, url: `https://explorer.solana.com/tx/${pc[d.day].sig}?cluster=devnet` } : null })),
@@ -221,7 +224,7 @@ const routes = {
       about: "Hourly: floors and caps on AI chip rental prices, Solana, test money unless cluster says mainnet. Agents read here and hand the user a link; the user reviews, gets a firm price and signs. No agent can move funds.",
       cluster: venue.CLUSTER, asOf: new Date().toISOString(),
       chips: ix.map((g) => ({
-        code: g.code, label: g.label, last: g.last, lastDate: g.lastDate, change7d: g.chg7, change30d: g.chg30,
+        code: g.code, label: g.label, ...(INDEX_PUBLIC() ? { last: g.last, lastDate: g.lastDate, change7d: g.chg7, change30d: g.chg30 } : {}),
         markets: open.filter((m) => m.underlying === g.code).map((m) => ({ strike: m.strike, date: m.windowEnd, higherChance: m.model ? m.model.probItm : null, higherAskPerDollar: m.model ? m.model.ask : null, id: m.id,
           link: `${base}?t=${g.code}~higher~${m.strike}~${m.windowEnd}~10` })),
       })),
@@ -358,6 +361,7 @@ const server = http.createServer(async (req, res) => {
   const key = `${req.method} ${url.pathname}`;
   if ((req.method === "GET" || req.method === "HEAD") && /^\/(freeze|cap)\/?$/.test(url.pathname)) return serveStatic(req, res, "/freeze.html");
   // Quick was folded into Trade as the One tap mode; old links land there.
+  if ((req.method === "GET" || req.method === "HEAD") && /\/debt\/$/.test(url.pathname)) { res.writeHead(301, { location: "../debt" + url.search }); return res.end(); }
   if ((req.method === "GET" || req.method === "HEAD") && /^\/quick\/?$/.test(url.pathname)) {
     res.writeHead(302, { location: url.pathname.endsWith("/") ? "../?mode=tap" : "./?mode=tap" });
     return res.end();

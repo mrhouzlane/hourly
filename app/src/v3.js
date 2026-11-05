@@ -25,7 +25,7 @@ const monthOf = (d) => MONTH[new Date(`${d}T00:00:00Z`).getUTCMonth()];
 const monShort = (d) => MON[new Date(`${d}T00:00:00Z`).getUTCMonth()];
 function countdown(t) {
   const s = t - Date.now() / 1000;
-  if (s <= 0) return "closed";
+  if (s <= 0) return "ended";
   const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60);
   return d > 0 ? `${d}d ${h}h` : h > 0 ? `${h}h ${m}m` : `${Math.max(1, m)}m`;
 }
@@ -57,7 +57,7 @@ const VIEWS = ["home", "desk", "index", "debt", "house", "docs", "access"];
 const ON_DEBT = /\/debt\/?$/.test(location.pathname);
 const BASE = location.pathname.replace(/debt\/?$/, "");
 // "portfolio" kept so old links (the Colosseum submission points at #portfolio) land on Trade, where Positions live.
-const HASH = { trade: "desk", index: "index", house: "house", docs: "docs", home: "home", access: "access", portfolio: "desk" };
+const HASH = { trade: "desk", index: "index", house: "house", docs: "docs", home: "home", access: "access", portfolio: "desk", debt: "debt" };
 const qs0 = (() => { try { return new URLSearchParams(location.search); } catch (_) { return new URLSearchParams(); } })();
 const mode0 = ["ticket", "tap", "lock"].includes(qs0.get("mode")) ? qs0.get("mode") : null;
 const S = {
@@ -203,10 +203,10 @@ function renderMenu() {
     <span class="spacer"></span>
     <span class="tag">${isTest() ? "Test money" : "Mainnet"}</span>
     ${S.wallet ? `<button id="wallet-btn" title="${esc(S.wallet.address)}">${S.wallet.address.slice(0, 4)}…${S.wallet.address.slice(-4)}</button>` : ""}
-    ${ra ? '<button class="ra" data-ra>Request access</button>' : ""}`;
+    ${ra ? '<button class="ra" data-ra>Request a seat</button>' : ""}`;
   $$("#menubar [data-view]").forEach((b) => b.addEventListener("click", () => go(b.dataset.view)));
   const wb = $("#wallet-btn"); if (wb) wb.addEventListener("click", walletMenu);
-  const r = $("#menubar [data-ra]"); if (r) r.addEventListener("click", () => go("access"));
+  const r = $("#menubar [data-ra]"); if (r) r.addEventListener("click", () => { go("home"); const b = $("#open-seat"); if (b) b.click(); });
   const bb = $("#botbar");
   if (bb) bb.textContent = S.view === "index" ? "List prices, unsigned, not yet used to pay out any contract." : "Test money. Not audited.";
 }
@@ -366,8 +366,9 @@ function deskView() {
 }
 // ---------- my exposure: inputs stay in this page only (never stored, never sent) ----------
 const EXP = { gpus: "64", ends: "2026-12-15", rate: "", pick: "mid" };
+const HOLD = () => !(S.status && S.status.indexPublic);
 const RATE_PICKS = [["low", "Low"], ["mid", "Mid, the index"], ["high", "High"]];
-function expRate() { if (EXP.pick === "custom") return Number(EXP.rate); const ix = expIndex(); return ix && ix.range ? Math.round(ix.range[EXP.pick] * 100) / 100 : 0; }
+function expRate() { if (EXP.pick === "custom" || HOLD()) return Number(EXP.rate); const ix = expIndex(); return ix && ix.range ? Math.round(ix.range[EXP.pick] * 100) / 100 : 0; }
 const HOURS_MONTH = 730;
 function expIndex() {
   const d = IXP.H100; if (!d) loadPrints("H100");
@@ -382,6 +383,7 @@ function exposureWindow() {
     <div id="x-out">${expOut()}</div></div></section>`;
 }
 function pickHtml() {
+  if (HOLD()) return `<input id="x-rate" inputmode="decimal" placeholder="$ per GPU hour" value="${esc(EXP.rate)}">`;
   const ix = expIndex();
   const opt = ([k, l]) => `<button type="button" data-rp="${k}" class="${EXP.pick === k ? "on" : ""}"><span>${l}</span><b>${ix && ix.range ? usd(ix.range[k]) : "--"}</b></button>`;
   const when = ix && ix.computed_at ? new Date(ix.computed_at) : null;
@@ -397,7 +399,7 @@ function expOut() {
   return `<div class="xr"><div class="xh"><i>Rent at risk this month</i><b>${ready ? usd(rent, 0) : "--"}</b></div>
     <div class="xl"><span>If rent falls 10%</span><b>${ready ? `${usd(rent * 0.1, 0)} lost` : "--"}</b></div>
     <div class="xl"><span>If rent falls 20%</span><b>${ready ? `${usd(rent * 0.2, 0)} lost` : "--"}</b></div></div>
-    <div class="xbtn"><button class="cta" id="x-floor" ${ready && ix ? "" : "disabled"}>Floor these hours</button><a href="#" id="x-hand">Request a quote by hand</a></div>
+    <div class="xbtn"><button class="cta" id="x-floor" ${ready && (ix || HOLD()) ? "" : "disabled"}>Floor these hours</button><a href="#" id="x-hand">Request a quote by hand</a></div>
     <p class="st" id="x-st"></p>`;
 }
 function expChanged() { const o = $("#x-out"); if (o) { o.innerHTML = expOut(); bindExpOut(); } if (S.hedge.linked && S.mode === "lock") linkFloor(false); }
@@ -421,12 +423,12 @@ const CAPC = {};
 function floorPick() {
   const ix = expIndex(), n = Math.floor(Number(EXP.gpus));
   const puts = S.markets.filter((m) => m.door === "hedge" && m.status === "open" && m.underlying === "H100_SXM" && m.kind === "put" && m.model);
-  if (!ix || !puts.length || !(n > 0)) return null;
+  const base = HOLD() ? expRate() : ix && ix.range ? ix.range.mid : 0;
+  if (!(base > 0) || !puts.length || !(n > 0)) return null;
   const end = EXP.ends ? Date.parse(`${EXP.ends}T00:00:00Z`) : Date.now();
   const gap = (m) => { const a = Date.parse(`${m.windowStart}T00:00:00Z`), b = Date.parse(`${m.windowEnd}T23:59:59Z`); return end >= a && end <= b ? 0 : Math.min(Math.abs(end - a), Math.abs(end - b)); };
   const win = puts.slice().sort((x, y) => gap(x) - gap(y))[0].windowStart;
-  if (!ix.range) return null;
-  const target = Math.round(ix.range.mid * 0.9 * 100) / 100; // index Mid minus 10%
+  const target = Math.round(base * 0.9 * 100) / 100; // index Mid minus 10% (your rate minus 10% while the index is on hold)
   const m = puts.filter((x) => x.windowStart === win).reduce((p, x) => (Math.abs(x.strike - target) < Math.abs(p.strike - target) ? x : p));
   return { m, win, target, n };
 }
@@ -739,7 +741,25 @@ function rangeChart(days, { W = 1150, H = 330, R = 74, B = 30, T = 22, L = 10, a
     <path d="${mid}" fill="none" stroke="#fff" stroke-width="${axis ? 2 : 1.6}" stroke-linejoin="round" ${axis ? "" : 'vector-effect="non-scaling-stroke"'}/>
     ${axis ? `<circle cx="${X(li).toFixed(1)}" cy="${Y(pts[li].mid).toFixed(1)}" r="5" fill="#fff"/>` : ""}${xl}</svg>`;
 }
+// Index hold: chip names, the band without numbers, and which days printed. No values, no sources, no links.
+function indexHoldView() {
+  const cs = chips();
+  const g = S.index.find((x) => x.code === S.ixChip) || cs[0];
+  if (g && !IXP[g.label]) loadPrints(g.label);
+  const days = (g && IXP[g.label] && IXP[g.label].days) || [];
+  const recent = days.slice(-14).reverse().map((d) => `<tr class="${d.printed ? "" : "gap"}"><td>${day(d.day)}</td><td>${d.printed ? "Printed" : "no print"}</td></tr>`).join("");
+  return `<div class="pg">
+    <h1>Hourly Index</h1>
+    <p class="sub">USD per GPU hour, as a range across sources. One print a day per chip. Numbers are on hold until the print is public.</p>
+    <section class="win ixbig"><div class="bh"><span class="seg">${cs.map((c) => `<button data-ix="${c.code}" class="${g && c.code === g.code ? "on" : ""}">${esc(c.label)}</button>`).join("")}</span></div>
+      <div class="holdband"><div class="z"></div><div class="z"></div><div class="z"></div><div class="hb"><span>Low</span><span>Mid</span><span>High</span></div></div>
+      <div class="holdlbl"><span>Outliers dropped</span><span>The range</span><span>Outliers dropped</span></div>
+      <p class="when">Range withheld until the print is public.</p></section>
+    ${win(`Recent prints, ${g ? esc(g.label) : ""}`, `<table class="tb"><tr><th>Day</th><th>Status</th></tr>${recent || '<tr><td colspan="2">Loading.</td></tr>'}</table>`, "Daily, gaps shown", "big")}
+  </div>`;
+}
 function indexView() {
+  if (HOLD()) return indexHoldView();
   const cs = chips();
   const g = S.index.find((x) => x.code === S.ixChip) || cs[0];
   if (!g) return '<div class="pg"><h1>Hourly Index</h1></div>';
@@ -829,7 +849,7 @@ function docsView() {
     <div class="docs"><nav>${nav.map(([k, l]) => `<a href="#${k}" data-jump="${k}">${l}</a>`).join("")}</nav><div>
       <section><h2 id="tickets">Tickets<small>01</small></h2>
         <ul><li><b>Ticket:</b> a floor or a cap at a strike, for one day's print.</li><li><b>One tap:</b> the same ticket, with set amounts.</li><li><b>Lock a month:</b> a floor or a cap on a month's average, for one GPU.</li></ul>
-        <p>You pay the Premium up front. That is all you can lose. What it pays up to sits in escrow from the moment it trades.</p></section>
+        <p>You pay the Premium up front. What it pays up to sits in escrow from the moment it trades.</p></section>
       <section><h2 id="why-onchain">Why onchain<small>02</small></h2>
         <p>Sources are offchain. The print, the payout rule and the collateral are onchain and can't be changed after you pay. Every contract is fully backed in escrow, so neither side needs to trust the other.</p></section>
       <section><h2 id="the-index">The Index<small>03</small></h2>
