@@ -1,7 +1,8 @@
 // Home, hero v2 (reference: ~/hourly-site-v3/ref-hero2/h1d, h2d, h3d): one centred column, one action.
 // Closed: kicker, headline, subline, Request a seat, See how it works, seat line, three chips.
-// Open: the seat line stays and a compact form replaces the button, link and chips. Done: a short ledger moment:
-// "recording seat" types, 50 slots light up to the visitor's seat, then "Seat 01 / 50" rolls in with their name and time.
+// Open: the seat line stays and a compact form replaces the button, link and chips. Done: the form collapses,
+// "recording seat" types, a Founding GPU Owner ticket slides in with the seat number from the server, the bar fills,
+// then Share my seat (X intent) and Explore the Debt page.
 // Below: the Hourly Founding Board, shown only once it has entries. See how it works opens Docs.
 // Backend: /api/seats, /api/seats/count, /api/founders. No index numbers are shown here while the hold is on.
 export const SEATS_TOTAL = 50;
@@ -32,10 +33,18 @@ export function siteHtml() {
     </div>
     <div class="done" id="s-ok" role="status" hidden>
       <div class="recline" id="rec-line">recording seat<span class="cur"></span></div>
-      <div class="slots" id="slots" aria-hidden="true">${"<i></i>".repeat(SEATS_TOTAL)}</div>
-      <div class="seatno"><span class="lbl">Seat</span><b id="s-num">00</b><span class="of">/ ${SEATS_TOTAL}</span></div>
-      <p class="meta" id="s-meta"></p>
-      <p class="sub3">We'll reach out within a week.</p></div>
+      <div class="sok-ticket" id="sok-ticket">
+        <div class="tk-top"><span class="tk-mark"><svg viewBox="0 0 44 44" shape-rendering="crispEdges" aria-hidden="true"><g fill="currentColor"><rect x="0" y="0" width="8" height="44"/><rect x="36" y="0" width="8" height="44"/><rect x="12" y="8" width="20" height="4"/><rect x="16" y="12" width="12" height="4"/><rect x="20" y="16" width="4" height="4"/><rect x="20" y="24" width="4" height="4"/><rect x="16" y="28" width="12" height="4"/><rect x="12" y="32" width="20" height="4"/></g></svg></span><span class="tk-tag">Founding</span></div>
+        <div class="tk-role">Founding GPU Owner</div>
+        <div class="tk-seat"><span>Seat</span><b id="s-num">#00</b><span>of ${SEATS_TOTAL}</span></div>
+        <div class="tk-meta"><span id="sok-who"></span><span><span id="sok-date"></span> · Recorded</span></div>
+        <div class="tk-foot"><span>Devnet beta</span><span>USDC on Solana</span></div>
+        <i class="shine" aria-hidden="true"></i>
+      </div>
+      <div class="sok-progress"><div class="bar"><i id="sok-bar"></i></div><div class="cl"><b id="sok-claimed">0</b> of ${SEATS_TOTAL} seats claimed</div></div>
+      <p class="sub3">We'll reach out within a week.</p>
+      <div class="sok-actions"><a class="pill2" id="sok-share" href="#" target="_blank" rel="noopener">Share my seat</a><a class="ghost2" href="debt" id="sok-debt">Explore the Debt page</a></div>
+    </div>
   </section>
 
   <section class="win board2" id="board" hidden>
@@ -74,26 +83,32 @@ export function bindSite({ api }) {
   const wait = (ms) => new Promise((r) => setTimeout(r, still ? 0 : ms));
   // roll the seat number from 00 up to n (instant when motion is reduced)
   const rollTo = (el, n) => new Promise((done) => {
-    if (still) { el.textContent = pad(n); return done(); }
+    if (still) { el.textContent = "#" + pad(n); return done(); }
     const t0 = performance.now(), dur = 520 + Math.min(n, 50) * 12;
-    const step = (t) => { const k = Math.min(1, (t - t0) / dur), v = Math.round(n * (1 - Math.pow(1 - k, 3))); el.textContent = pad(v); if (k < 1) requestAnimationFrame(step); else done(); };
+    const step = (t) => { const k = Math.min(1, (t - t0) / dur), v = Math.round(n * (1 - Math.pow(1 - k, 3))); el.textContent = "#" + pad(v); if (k < 1) requestAnimationFrame(step); else done(); };
     requestAnimationFrame(step);
   });
-  // the ledger moment after a seat is recorded
-  const recorded = async (seat, claimed, name) => {
-    const box = $("#s-ok"), line = $("#rec-line"), slots = [...root.querySelectorAll("#slots i")];
-    box.hidden = false; box.className = "done s1";
-    await wait(650);
-    line.innerHTML = "recorded";
-    box.classList.add("s2");
-    slots.forEach((s, i) => { if (i < claimed) setTimeout(() => s.classList.add(i === seat - 1 ? "me" : "on"), still ? 0 : i * 22); });
-    await wait(Math.min(claimed, 50) * 22 + 200);
-    box.classList.add("s3");
-    await rollTo($("#s-num"), seat);
+  const shareIntent = (seat) => `https://x.com/intent/post?text=${encodeURIComponent(`I just claimed Founding GPU Owner seat #${seat} on @hourly_markets. A floor on GPU rent, paid out in USDC on Solana. hourly.markets/?ref=seat`)}`;
+  // the success moment after a seat is recorded; seat and claimed come from the server reply
+  const playSeatSuccess = async (seat, claimed, name) => {
+    const hero = $("#seats"), box = $("#s-ok"), line = $("#rec-line");
     const t = new Date();
-    $("#s-meta").textContent = `${name} · ${t.toUTCString().slice(5, 16)} · ${pad(t.getUTCHours())}:${pad(t.getUTCMinutes())} UTC`;
-    box.classList.add("s4");
-    const sl = $("#seats-claimed"); sl.textContent = String(claimed); sl.parentElement.classList.remove("bump"); void sl.offsetWidth; sl.parentElement.classList.add("bump");
+    $("#sok-who").textContent = name;
+    $("#sok-date").textContent = t.toUTCString().slice(5, 16);
+    $("#sok-share").href = shareIntent(seat);
+    hero.classList.add("is-done");
+    box.hidden = false; box.className = "done s1";
+    await wait(700);
+    line.textContent = "recorded";
+    box.classList.add("s2");                       // ticket slides in with a shine
+    await rollTo($("#s-num"), seat);
+    $("#s-num").textContent = "#" + pad(seat);
+    box.classList.add("s3");                       // bar fills, counter ticks up
+    $("#sok-bar").style.width = `${Math.min(100, (claimed / SEATS_TOTAL) * 100)}%`;
+    $("#sok-claimed").textContent = String(claimed);
+    $("#seats-claimed").textContent = String(claimed);
+    await wait(450);
+    box.classList.add("s4");                       // note and actions
   };
   count();
 
@@ -113,8 +128,11 @@ export function bindSite({ api }) {
     go.disabled = true; go.textContent = "Sending";
     try {
       const r = await submitSeatRequest(api, body);
-      $("#seat-panel").hidden = true;
-      recorded(r.seat || r.claimed || 1, r.claimed || 1, body.name);
+      const panel = $("#seat-panel");
+      panel.classList.add("is-collapsing");
+      await wait(280);
+      panel.hidden = true; panel.classList.remove("is-collapsing");
+      playSeatSuccess(r.seat || r.claimed || 1, r.claimed || 1, body.name);
     }
     catch (e2) { serr.textContent = e2.message; serr.classList.add("open"); }
     go.disabled = false; go.textContent = "Submit";
