@@ -253,11 +253,9 @@ function orbRing() {
   for (const a of [-1.62, 0.12, 1.6, 3.2]) t += `<line x1="${(220 + 172 * Math.cos(a)).toFixed(1)}" y1="${(220 + 172 * Math.sin(a)).toFixed(1)}" x2="${(220 + 218 * Math.cos(a)).toFixed(1)}" y2="${(220 + 218 * Math.sin(a)).toFixed(1)}" stroke="rgba(255,255,255,.75)" stroke-width="1.6"/>`;
   return `<svg viewBox="0 0 440 440" aria-hidden="true"><circle cx="220" cy="220" r="180" fill="none" stroke="rgba(255,255,255,.2)" stroke-dasharray="1 5"/>${t}</svg>`;
 }
-// The orb on top; the Founding GPU Owner seats sit directly under it.
+// Home: the orb and the Founding GPU Owner seats on the left, the Hourly Founding Board on the right.
 function homeView() {
-  return `<section class="hero">
-    <div class="orb">${orbRing()}<img src="v3/orb.png" alt="" width="272" height="272"></div>
-  </section>${siteHtml()}`;
+  return siteHtml(`${orbRing()}<img src="v3/orb.png" alt="" width="272" height="272">`);
 }
 function bindHome() {
   $$("#desk [data-go]").forEach((b) => b.addEventListener("click", () => go(b.dataset.go)));
@@ -865,7 +863,7 @@ function render() {
   if (!VIEWS.includes(S.view)) S.view = "desk";
   document.title = S.view === "debt" ? "Hourly · Debt" : "Hourly";
   // home and debt hold forms and a film: never rebuild them under the user
-  if ((S.view === "home" && $("#desk .site") && $("#desk .hero")) || (S.view === "debt" && $("#desk .debtpg"))) return;
+  if ((S.view === "home" && $("#desk .site")) || (S.view === "debt" && $("#desk .debtpg"))) return;
   const views = { home: homeView, debt: debtView, desk: deskView, index: indexView, house: houseView, docs: docsView, access: accessView };
   $("#desk").innerHTML = views[S.view]();
   document.body.dataset.view = S.view;
