@@ -247,3 +247,6 @@
 @media (max-width:760px){.debtpg .tiles{grid-template-columns:1fr}.debtpg .tiles b{font-size:22px}}
 .debtpg .cards.more[hidden]{display:none}
 @media (max-width:760px){.debtpg .tiles{gap:8px;margin-bottom:18px}.debtpg .tiles>div{padding:10px 12px}.debtpg .tiles b{margin-top:4px;font-size:20px}.debtpg .tiles small{margin-top:3px}}
+/* original hero on top: the sections start under it */
+.site{padding-top:0}
+.site #hero .price-row{margin-top:4px}

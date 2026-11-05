@@ -1,68 +1,73 @@
-// Home sections from the site-v3 draft: hero film, problem, how it works, guess game, board, seats, Debt teaser.
+// Home sections from the site-v3 draft: Founding GPU Owner seats, same H100 two prices, guess game, board, Debt teaser.
 // Backend: /api/guesses, /api/board, /api/seats, /api/seats/count. No index numbers are shown here while the hold is on.
 export function siteHtml() {
   return `<div class="site">
 
-  <header class="shero" id="hero">
-    <div class="kick">Hourly · USDC on Solana · Devnet beta</div>
-    <h1>Every GPU on earth.<br>Priced by the hour.</h1>
-    <p class="sub">Floors and caps on GPU rent, onchain on Solana.</p>
-    <div class="price-row" aria-label="Same H100, same hour, two public list prices">
-      <div class="price">$1.99<small>Same H100</small></div>
-      <div class="vs">or</div>
-      <div class="price alt">$12.29<small>Same hour</small></div>
-    </div>
-    <p class="fine" style="margin:0">Illustration · public listings. GPU rent has no price anyone agrees on.</p>
-    <div class="cta-row">
-      <a class="pill" href="#trade" id="cta-try">Try with test money</a>
-      <a class="pill ghost" href="#guess">Guess today's range</a>
-    </div>
-    <div class="film-wrap" id="film">
-      <video id="l01" data-src="site/l01-launch.mp4" muted loop playsinline preload="none" poster="og.png" aria-label="Hourly launch film"></video>
-      <button type="button" class="unmute" id="unmute" aria-pressed="false">Unmute</button>
-    </div>
-  </header>
-  <section class="panel" id="problem">
-    <div class="sh"><span><span class="dots"><b></b><b></b><b></b></span>The gap</span><span class="r">Why floors matter</span></div>
+  <section class="panel" id="seats">
+    <div class="sh"><span><span class="dots"><b></b><b></b><b></b></span>Devnet beta</span><span class="r">GPU owners</span></div>
     <div class="sb">
-      <h2>GPU owners borrow for 3 years. They rent out for 12 to 18 months.</h2>
-      <p class="note">The gap is pure rent price risk. A floor on GPU rent pays out when that rent drops.</p>
-      <div class="bars" aria-hidden="false">
-        <div class="bar-row">
-          <div class="lbl"><span>Loan</span><span>3 years</span></div>
-          <div class="bar-track"><div class="fill loan">Loan term</div></div>
-        </div>
-        <div class="bar-row">
-          <div class="lbl"><span>Rental contract</span><span>12 to 18 months</span></div>
-          <div class="bar-track">
-            <div class="fill rent">Rental</div>
-            <div class="gapz">Rent price risk</div>
+      <h2>If you own GPUs, do this.</h2>
+      <p class="note">Request one of 50 Founding GPU Owner seats. The site stays open to everyone with test money; the seats are a perk, not a gate.</p>
+      <div class="seats-grid">
+        <div>
+          <div class="seat-stat">
+            <div class="kick" style="margin-bottom:10px">Seats claimed</div>
+            <div class="sbig"><span id="seats-claimed"></span><small> / 50</small></div>
+            <p class="fine" style="margin:12px 0 0">Counter starts at zero. Fills from real requests only.</p>
           </div>
+          <ul class="perk" style="margin-top:14px">
+            <li><b>Priority on mainnet</b> when it opens</li>
+            <li><b>Direct line</b> to the Hourly team</li>
+            <li><b>Name on the board</b> as a Founding GPU Owner</li>
+          </ul>
         </div>
-        <div class="axis3"><span>Year 1</span><span>Year 2</span><span>Year 3</span></div>
+        <div>
+          <form id="seat-form" novalidate>
+            <div class="field">
+              <label for="s-name">Name</label>
+              <input id="s-name" name="name" type="text" maxlength="80" required placeholder="Your name">
+            </div>
+            <div class="field">
+              <label for="s-co">Company</label>
+              <input id="s-co" name="company" type="text" maxlength="80" required placeholder="Company or project">
+            </div>
+            <div class="field">
+              <label for="s-gpus">GPUs owned</label>
+              <select id="s-gpus" name="gpus" required style="width:100%;background:var(--panel-2);border:1px solid var(--line);padding:12px 14px;font:600 14px/1.2 var(--mono);color:#fff">
+                <option value="">Select a range</option>
+                <option>Under 64</option>
+                <option>64 to 511</option>
+                <option>512 to 4k</option>
+                <option>4k plus</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="s-email">Email <span style="color:var(--mute);text-transform:none;letter-spacing:0">(optional)</span></label>
+              <input id="s-email" name="email" type="email" maxlength="120" placeholder="you@company.com">
+            </div>
+            <div class="guess-acts">
+              <button type="submit" class="pri">Request a seat</button>
+              <a href="#access">Full access form</a>
+            </div>
+            <p class="err" id="s-err" role="alert"></p>
+            <div class="okmsg" id="s-ok">Request received. We will be in touch.</div>
+          </form>
+        </div>
       </div>
-      <p style="margin:18px 0 0"><a class="linkish" href="debt" data-debt>See the public GPU debt tracker</a></p>
     </div>
   </section>
-  <section class="panel" id="how">
-    <div class="sh"><span><span class="dots"><b></b><b></b><b></b></span>How it works</span><span class="r">Floors and caps</span></div>
+  <section class="panel" id="hero">
+    <div class="sh"><span><span class="dots"><b></b><b></b><b></b></span>Same H100, same hour</span><span class="r">Illustration</span></div>
     <div class="sb">
-      <h2>The Hourly Index range. Floors and caps on that range.</h2>
-      <p class="note">Many providers. Each counted once. Every price fresh. Drop the outliers. Keep the range where 80% sit.</p>
-      <div class="range-demo">
-        <span class="chip">H100</span>
-        <div class="range-track" aria-label="Hourly Index range, Low Mid High. Numbers held for now.">
-          <div class="z"></div><div class="z"></div><div class="z"></div>
-          <div class="range-band"><span>Low</span><span>Mid</span><span>High</span></div>
-        </div>
-        <div class="range-labels"><span>Outliers dropped</span><span>80% band</span><span>Outliers dropped</span></div>
-        <p class="fine" style="margin:10px 0 0">Range shown without today's numbers. Live prints sit on the Index page once the hold lifts.</p>
+      <div class="price-row" aria-label="Same H100, same hour, two public list prices">
+        <div class="price">$1.99<small>Same H100</small></div>
+        <div class="vs">or</div>
+        <div class="price alt">$12.29<small>Same hour</small></div>
       </div>
-      <div class="steps" style="margin-top:18px">
-        <div class="step"><div class="n">01</div><h3>Index range</h3><p>One daily print per chip. Low, Mid and High from public rental list prices.</p></div>
-        <div class="step"><div class="n">02</div><h3>Floor or Cap</h3><p>Pick a line on that range. A floor for owners. A cap for renters.</p></div>
-        <div class="step"><div class="n">03</div><h3>Premium</h3><p>You pay the Premium up front. That is all you can lose.</p></div>
-        <div class="step"><div class="n">04</div><h3>Pays out onchain</h3><p>If rent moves past your line, it pays out onchain on Solana. Anyone can check.</p></div>
+      <p class="fine" style="margin:0">Illustration · public listings. GPU rent has no price anyone agrees on.</p>
+      <div class="cta-row">
+        <a class="pill" href="#trade" id="cta-try">Try with test money</a>
+        <a class="pill ghost" href="#guess">Guess today's range</a>
       </div>
     </div>
   </section>
@@ -131,59 +136,6 @@ export function siteHtml() {
           <div class="brow"><span class="rank">4</span><div class="skel"></div><div class="skel short"></div></div>
           <div class="brow"><span class="rank">5</span><div class="skel"></div><div class="skel short"></div></div>
           <div class="brow"><span class="rank">6</span><div class="skel"></div><div class="skel short"></div></div>
-        </div>
-      </div>
-    </div>
-  </section>
-  <section class="panel" id="seats">
-    <div class="sh"><span><span class="dots"><b></b><b></b><b></b></span>Devnet beta</span><span class="r">GPU owners</span></div>
-    <div class="sb">
-      <h2>50 Founding GPU Owner seats.</h2>
-      <p class="note">The site is open to everyone with test money. These 50 seats are a perk for GPU owners, not a gate.</p>
-      <div class="seats-grid">
-        <div>
-          <div class="seat-stat">
-            <div class="kick" style="margin-bottom:10px">Seats claimed</div>
-            <div class="sbig"><span id="seats-claimed"></span><small> / 50</small></div>
-            <p class="fine" style="margin:12px 0 0">Counter starts at zero. Fills from real requests only.</p>
-          </div>
-          <ul class="perk" style="margin-top:14px">
-            <li><b>Priority on mainnet</b> when it opens</li>
-            <li><b>Direct line</b> to the Hourly team</li>
-            <li><b>Name on the board</b> as a Founding GPU Owner</li>
-          </ul>
-        </div>
-        <div>
-          <form id="seat-form" novalidate>
-            <div class="field">
-              <label for="s-name">Name</label>
-              <input id="s-name" name="name" type="text" maxlength="80" required placeholder="Your name">
-            </div>
-            <div class="field">
-              <label for="s-co">Company</label>
-              <input id="s-co" name="company" type="text" maxlength="80" required placeholder="Company or project">
-            </div>
-            <div class="field">
-              <label for="s-gpus">GPUs owned</label>
-              <select id="s-gpus" name="gpus" required style="width:100%;background:var(--panel-2);border:1px solid var(--line);padding:12px 14px;font:600 14px/1.2 var(--mono);color:#fff">
-                <option value="">Select a range</option>
-                <option>Under 64</option>
-                <option>64 to 511</option>
-                <option>512 to 4k</option>
-                <option>4k plus</option>
-              </select>
-            </div>
-            <div class="field">
-              <label for="s-email">Email <span style="color:var(--mute);text-transform:none;letter-spacing:0">(optional)</span></label>
-              <input id="s-email" name="email" type="email" maxlength="120" placeholder="you@company.com">
-            </div>
-            <div class="guess-acts">
-              <button type="submit" class="pri">Request a seat</button>
-              <a href="#access">Full access form</a>
-            </div>
-            <p class="err" id="s-err" role="alert"></p>
-            <div class="okmsg" id="s-ok">Request received. We will be in touch.</div>
-          </form>
         </div>
       </div>
     </div>
@@ -284,14 +236,6 @@ export function bindSite({ api, go }) {
   root.querySelectorAll("a[data-debt]").forEach((a) => a.addEventListener("click", (e) => { e.preventDefault(); go("debt"); }));
   // try CTA carries the ref
   const ref = getRef();
-
-  // film: load only when near the viewport, autoplay muted
-  const v = $("#l01"), um = $("#unmute");
-  if (v) {
-    const start = () => { if (!v.src) { v.src = v.dataset.src; v.play().catch(() => {}); } };
-    if ("IntersectionObserver" in window) { const io = new IntersectionObserver((es) => { if (es.some((x) => x.isIntersecting)) { start(); io.disconnect(); } }, { rootMargin: "200px" }); io.observe(v); } else start();
-    um.addEventListener("click", () => { start(); v.muted = !v.muted; um.textContent = v.muted ? "Unmute" : "Mute"; um.classList.toggle("on", !v.muted); um.setAttribute("aria-pressed", String(!v.muted)); if (!v.muted) v.play().catch(() => {}); });
-  }
 
   // guess
   const form = $("#guess-form"), err = $("#g-err"), shareBtn = $("#g-share"), xpost = $("#g-xpost");

@@ -253,8 +253,22 @@ function orbRing() {
   for (const a of [-1.62, 0.12, 1.6, 3.2]) t += `<line x1="${(220 + 172 * Math.cos(a)).toFixed(1)}" y1="${(220 + 172 * Math.sin(a)).toFixed(1)}" x2="${(220 + 218 * Math.cos(a)).toFixed(1)}" y2="${(220 + 218 * Math.sin(a)).toFixed(1)}" stroke="rgba(255,255,255,.75)" stroke-width="1.6"/>`;
   return `<svg viewBox="0 0 440 440" aria-hidden="true"><circle cx="220" cy="220" r="180" fill="none" stroke="rgba(255,255,255,.2)" stroke-dasharray="1 5"/>${t}</svg>`;
 }
-function homeView() { return siteHtml(); }
-function bindHome() { bindSite({ api, go }); }
+// The original hero stays on top; the site v3 sections follow it.
+function homeView() {
+  return `<section class="hero">
+    <div class="orb">${orbRing()}<img src="v3/orb.png" alt="" width="272" height="272"></div>
+    <h1>Lock the price of compute.</h1>
+    <p class="hs">Next month's GPU hour, in <span class="coin">USDC on Solana devnet</span>.</p>
+    <button class="pill" data-seats>Request access</button>
+    <span class="tag">Test money</span>
+  </section>${siteHtml()}`;
+}
+function bindHome() {
+  $$("#desk [data-go]").forEach((b) => b.addEventListener("click", () => go(b.dataset.go)));
+  // the hero button goes straight to the Founding GPU Owner seats, the page's main ask
+  const sb = $("#desk [data-seats]"); if (sb) sb.addEventListener("click", () => { const el = $("#seats"); if (el) el.scrollIntoView({ behavior: "smooth" }); const n = $("#s-name"); if (n) setTimeout(() => n.focus({ preventScroll: true }), 500); });
+  bindSite({ api, go });
+}
 // Debt is loaded on demand so the home and trade bundles stay light.
 function debtView() { return '<div class="debtpg"><p class="fine">Loading.</p></div>'; }
 function bindDebt() { import("./debt.js").then((m) => { if (S.view !== "debt") return; $("#desk").innerHTML = m.debtHtml(); m.bindDebt(); }); }
@@ -855,7 +869,7 @@ function render() {
   if (!VIEWS.includes(S.view)) S.view = "desk";
   document.title = S.view === "debt" ? "Hourly · Debt" : "Hourly";
   // home and debt hold forms and a film: never rebuild them under the user
-  if ((S.view === "home" && $("#desk .site")) || (S.view === "debt" && $("#desk .debtpg"))) return;
+  if ((S.view === "home" && $("#desk .site") && $("#desk .hero")) || (S.view === "debt" && $("#desk .debtpg"))) return;
   const views = { home: homeView, debt: debtView, desk: deskView, index: indexView, house: houseView, docs: docsView, access: accessView };
   $("#desk").innerHTML = views[S.view]();
   document.body.dataset.view = S.view;
