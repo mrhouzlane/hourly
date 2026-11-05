@@ -1,6 +1,7 @@
 // Home, hero v2 (reference: ~/hourly-site-v3/ref-hero2/h1d, h2d, h3d): one centred column, one action.
 // Closed: kicker, headline, subline, Request a seat, See how it works, seat line, three chips.
-// Open: the seat line stays and a compact form replaces the button, link and chips. Done: a check and "Seat requested."
+// Open: the seat line stays and a compact form replaces the button, link and chips. Done: the check draws itself,
+// "Seat #N recorded." counts up to the visitor's seat, and the seat line ticks up.
 // Below: the Hourly Founding Board, shown only once it has entries. See how it works opens Docs.
 // Backend: /api/seats, /api/seats/count, /api/founders. No index numbers are shown here while the hold is on.
 export const SEATS_TOTAL = 50;
@@ -29,7 +30,9 @@ export function siteHtml() {
         <p class="err" id="s-err" role="alert"></p>
       </form>
     </div>
-    <div class="done" id="s-ok" role="status" hidden><span class="tick" aria-hidden="true">✓</span><b>Seat requested.</b><p>We'll reach out within a week.</p></div>
+    <div class="done" id="s-ok" role="status" hidden>
+      <svg class="tick2" viewBox="0 0 56 56" aria-hidden="true"><circle class="ring" cx="28" cy="28" r="25"/><path class="mark" d="M17 29 l7.5 7.5 L39 21"/></svg>
+      <b>Seat <span id="s-num">#</span> recorded.</b><p>We'll reach out within a week.</p></div>
   </section>
 
   <section class="win board2" id="board" hidden>
@@ -63,6 +66,14 @@ export function bindSite({ api }) {
 
   // seat count: live from the server, never hard coded
   const count = () => api("seats/count").then((c) => { $("#seats-claimed").textContent = String(c.claimed); }).catch(() => {});
+  const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  // count up from 1 to n over ~700 ms (instant when motion is reduced)
+  const countUp = (el, n, prefix = "") => {
+    if (still || n <= 1) { el.textContent = prefix + n; return; }
+    const t0 = performance.now(), dur = 700;
+    const step = (t) => { const k = Math.min(1, (t - t0) / dur), v = Math.max(1, Math.round(1 + (n - 1) * (1 - Math.pow(1 - k, 3)))); el.textContent = prefix + v; if (k < 1) requestAnimationFrame(step); };
+    requestAnimationFrame(step);
+  };
   count();
 
 
@@ -79,7 +90,12 @@ export function bindSite({ api }) {
     const body = { name: $("#s-name").value.trim(), email: $("#s-email").value.trim(), gpus: $("#s-gpus").value, company: $("#s-co").value.trim(), show: $("#s-show").checked, ref };
     if (!body.name || !body.gpus || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(body.email)) { serr.textContent = "Name, email and GPUs you run are required."; serr.classList.add("open"); return; }
     go.disabled = true; go.textContent = "Sending";
-    try { await submitSeatRequest(api, body); $("#seat-panel").hidden = true; $("#s-ok").hidden = false; count(); }
+    try {
+      const r = await submitSeatRequest(api, body);
+      $("#seat-panel").hidden = true; $("#s-ok").hidden = false;
+      countUp($("#s-num"), r.seat || r.claimed || 1, "#");
+      const line = $("#seats-claimed"); line.textContent = String(r.claimed); line.parentElement.classList.remove("bump"); void line.offsetWidth; line.parentElement.classList.add("bump");
+    }
     catch (e2) { serr.textContent = e2.message; serr.classList.add("open"); }
     go.disabled = false; go.textContent = "Submit";
   });

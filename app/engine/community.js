@@ -92,7 +92,8 @@ async function addSeat(body, ip) {
   seats.push(rec);
   // Also into the existing Request access inbox, so nothing is lost.
   await append(F.access, { at: rec.at, source: "seat", company: rec.company, email: rec.email, name: rec.name, role: "GPU owner", chips: [], gpuCount: rec.gpus, ref: rec.ref });
-  return { ok: true, ...seatCount() };
+  const order = [...new Set(seats.map(seatKey))];
+  return { ok: true, seat: Math.min(order.indexOf(seatKey(rec)) + 1, SEATS_TOTAL), ...seatCount() };
 }
 // A seat is one owner (company if given, else name): repeat requests do not count twice. Never above 50.
 const seatKey = (s) => (s.company || s.name).toLowerCase().replace(/\s+/g, " ");

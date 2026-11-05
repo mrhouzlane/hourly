@@ -218,3 +218,16 @@
   .site .seatform form{grid-template-columns:1fr}
   .site .how2{grid-template-columns:1fr}
 }
+
+/* recorded: the check draws itself, the number counts up, the seat line pulses */
+.site .done .tick2{width:56px;height:56px}
+.site .done .tick2 .ring{fill:#fff;stroke:#fff;stroke-width:2;stroke-dasharray:158;stroke-dashoffset:158;animation:draw .55s ease-out forwards,fillin .25s ease-out .45s both}
+.site .done .tick2 .mark{fill:none;stroke:var(--blue);stroke-width:4;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:34;stroke-dashoffset:34;animation:draw .35s ease-out .55s forwards}
+.site .done b{animation:rise .4s ease .5s both}
+.site .done p{animation:rise .4s ease .65s both}
+.site .done #s-num{font-variant-numeric:tabular-nums}
+.site .seatline.bump{animation:bump .9s ease}
+@keyframes draw{to{stroke-dashoffset:0}}
+@keyframes fillin{from{fill:transparent}to{fill:#fff}}
+@keyframes bump{0%{transform:scale(1);text-shadow:none}30%{transform:scale(1.12);text-shadow:0 0 18px rgba(255,255,255,.7)}100%{transform:scale(1);text-shadow:none}}
+@media (prefers-reduced-motion:reduce){.site .done .tick2 .ring,.site .done .tick2 .mark{animation:none;stroke-dashoffset:0}.site .done b,.site .done p,.site .seatline.bump{animation:none}}
