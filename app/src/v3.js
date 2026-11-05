@@ -4,6 +4,7 @@
 import { getWallets } from "@wallet-standard/app";
 import nacl from "tweetnacl";
 import bs58 from "bs58";
+import { siteHtml, bindSite, captureRef } from "./site.js";
 
 // ---------- utils (from mac.js) ----------
 const $ = (s, el = document) => el.querySelector(s);
@@ -24,7 +25,7 @@ const monthOf = (d) => MONTH[new Date(`${d}T00:00:00Z`).getUTCMonth()];
 const monShort = (d) => MON[new Date(`${d}T00:00:00Z`).getUTCMonth()];
 function countdown(t) {
   const s = t - Date.now() / 1000;
-  if (s <= 0) return "closed";
+  if (s <= 0) return "ended";
   const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60);
   return d > 0 ? `${d}d ${h}h` : h > 0 ? `${h}h ${m}m` : `${Math.max(1, m)}m`;
 }
@@ -51,14 +52,17 @@ async function api(path, body) {
 }
 
 // ---------- state ----------
-const VIEWS = ["home", "desk", "index", "house", "docs", "access"];
+const VIEWS = ["home", "desk", "index", "debt", "house", "docs", "access"];
+// Debt lives at its own path (/debt); every other view is a hash on the app root.
+const ON_DEBT = /\/debt\/?$/.test(location.pathname);
+const BASE = location.pathname.replace(/debt\/?$/, "");
 // "portfolio" kept so old links (the Colosseum submission points at #portfolio) land on Trade, where Positions live.
-const HASH = { trade: "desk", index: "index", house: "house", docs: "docs", home: "home", access: "access", portfolio: "desk" };
+const HASH = { trade: "desk", index: "index", house: "house", docs: "docs", home: "home", access: "access", portfolio: "desk", debt: "debt" };
 const qs0 = (() => { try { return new URLSearchParams(location.search); } catch (_) { return new URLSearchParams(); } })();
 const mode0 = ["ticket", "tap", "lock"].includes(qs0.get("mode")) ? qs0.get("mode") : null;
 const S = {
   status: null, index: [], meta: null, markets: [], vaults: [], activity: null, portfolio: null, wallet: null,
-  view: HASH[location.hash.slice(1)] || (mode0 || qs0.get("t") ? "desk" : qs0.get("cap") ? "desk" : "home"),
+  view: HASH[location.hash.slice(1)] || (ON_DEBT ? "debt" : null) || (mode0 || qs0.get("t") ? "desk" : qs0.get("cap") ? "desk" : "home"),
   mode: mode0 || (qs0.get("cap") ? "lock" : "ticket"),
   t: { gpu: "H100_SXM", side: "lower", strike: null, seriesId: null, amount: 10, quote: null, tapAmt: 5, tapDate: null },
   hedge: { gpu: "H100_SXM", role: "own", win: null, qty: 1 }, tapSide: "lower",
@@ -187,11 +191,11 @@ async function faucet() {
 
 // ---------- chrome ----------
 const COIN = '<span class="coin">USDC on Solana devnet (test)</span>';
-const go = (v) => { S.view = v; try { history.replaceState(null, "", `#${Object.keys(HASH).find((k) => HASH[k] === v) || v}`); } catch (_) { /* file */ } renderMenu(); render(); window.scrollTo(0, 0); if (v === "desk" && S.wallet) refreshPortfolio().then(() => { if (S.view === "desk" && !S.t.quote) render(); }); };
+const go = (v) => { S.view = v; try { history.replaceState(null, "", v === "debt" ? `${BASE}debt` : `${BASE}#${Object.keys(HASH).find((k) => HASH[k] === v) || v}`); } catch (_) { /* file */ } renderMenu(); render(); window.scrollTo(0, 0); if (v === "desk" && S.wallet) refreshPortfolio().then(() => { if (S.view === "desk" && !S.t.quote) render(); }); };
 // a fill can take a few seconds to show in account reads; read the portfolio again shortly after
 const refreshSoon = () => setTimeout(() => refreshPortfolio().then(() => { if (S.view === "desk" && !S.t.quote) render(); }), 4000);
 function renderMenu() {
-  const nav = [["desk", "Trade"], ["index", "Index"], ["house", "House"], ["docs", "Docs"]];
+  const nav = [["desk", "Trade"], ["index", "Index"], ["debt", "Debt"], ["house", "House"], ["docs", "Docs"]];
   const ra = S.view !== "home" && S.view !== "access";
   $("#menubar").innerHTML = `
     <button data-view="home" class="brand" aria-label="Hourly"><img src="mark.svg" alt="H">ourly</button>
@@ -199,10 +203,10 @@ function renderMenu() {
     <span class="spacer"></span>
     <span class="tag">${isTest() ? "Test money" : "Mainnet"}</span>
     ${S.wallet ? `<button id="wallet-btn" title="${esc(S.wallet.address)}">${S.wallet.address.slice(0, 4)}…${S.wallet.address.slice(-4)}</button>` : ""}
-    ${ra ? '<button class="ra" data-ra>Request access</button>' : ""}`;
+    ${ra ? '<button class="ra" data-ra>Request a seat</button>' : ""}`;
   $$("#menubar [data-view]").forEach((b) => b.addEventListener("click", () => go(b.dataset.view)));
   const wb = $("#wallet-btn"); if (wb) wb.addEventListener("click", walletMenu);
-  const r = $("#menubar [data-ra]"); if (r) r.addEventListener("click", () => go("access"));
+  const r = $("#menubar [data-ra]"); if (r) r.addEventListener("click", () => { go("home"); const b = $("#open-seat"); if (b) b.click(); });
   const bb = $("#botbar");
   if (bb) bb.textContent = S.view === "index" ? "List prices, unsigned, not yet used to pay out any contract." : "Test money. Not audited.";
 }
@@ -249,16 +253,19 @@ function orbRing() {
   for (const a of [-1.62, 0.12, 1.6, 3.2]) t += `<line x1="${(220 + 172 * Math.cos(a)).toFixed(1)}" y1="${(220 + 172 * Math.sin(a)).toFixed(1)}" x2="${(220 + 218 * Math.cos(a)).toFixed(1)}" y2="${(220 + 218 * Math.sin(a)).toFixed(1)}" stroke="rgba(255,255,255,.75)" stroke-width="1.6"/>`;
   return `<svg viewBox="0 0 440 440" aria-hidden="true"><circle cx="220" cy="220" r="180" fill="none" stroke="rgba(255,255,255,.2)" stroke-dasharray="1 5"/>${t}</svg>`;
 }
+// Home: hero v2, one centred column with a single action (Request a seat).
 function homeView() {
-  return `<section class="hero">
-    <div class="orb">${orbRing()}<img src="v3/orb.png" alt="" width="272" height="272"></div>
-    <h1>Lock the price of compute.</h1>
-    <p class="hs">Next month's GPU hour, in <span class="coin">USDC on Solana devnet</span>.</p>
-    <button class="pill" data-go="access">Request access</button>
-    <span class="tag">Test money</span>
-  </section>`;
+  return siteHtml();
 }
-function bindHome() { $$("#desk [data-go]").forEach((b) => b.addEventListener("click", () => go(b.dataset.go))); }
+function bindHome() {
+  $$("#desk [data-go]").forEach((b) => b.addEventListener("click", () => go(b.dataset.go)));
+  // the hero button goes straight to the Founding GPU Owner seats, the page's main ask
+  const sb = $("#desk [data-seats]"); if (sb) sb.addEventListener("click", () => { const el = $("#seats"); if (el) el.scrollIntoView({ behavior: "smooth" }); const n = $("#s-name"); if (n) setTimeout(() => n.focus({ preventScroll: true }), 500); });
+  bindSite({ api, go });
+}
+// Debt is loaded on demand so the home and trade bundles stay light.
+function debtView() { return '<div class="debtpg"><p class="fine">Loading.</p></div>'; }
+function bindDebt() { import("./debt.js").then((m) => { if (S.view !== "debt") return; $("#desk").innerHTML = m.debtHtml(); m.bindDebt(); }); }
 
 // ---------- request access ----------
 const ACC = { role: ["GPU owner", "Data center", "Reseller", "Renter"], chips: ["H100", "H200", "B200", "A100"], gpuCount: ["Under 64", "64 to 511", "512 to 4k", "4k plus"] };
@@ -359,8 +366,9 @@ function deskView() {
 }
 // ---------- my exposure: inputs stay in this page only (never stored, never sent) ----------
 const EXP = { gpus: "64", ends: "2026-12-15", rate: "", pick: "mid" };
+const HOLD = () => !(S.status && S.status.indexPublic);
 const RATE_PICKS = [["low", "Low"], ["mid", "Mid, the index"], ["high", "High"]];
-function expRate() { if (EXP.pick === "custom") return Number(EXP.rate); const ix = expIndex(); return ix && ix.range ? Math.round(ix.range[EXP.pick] * 100) / 100 : 0; }
+function expRate() { if (EXP.pick === "custom" || HOLD()) return Number(EXP.rate); const ix = expIndex(); return ix && ix.range ? Math.round(ix.range[EXP.pick] * 100) / 100 : 0; }
 const HOURS_MONTH = 730;
 function expIndex() {
   const d = IXP.H100; if (!d) loadPrints("H100");
@@ -375,6 +383,7 @@ function exposureWindow() {
     <div id="x-out">${expOut()}</div></div></section>`;
 }
 function pickHtml() {
+  if (HOLD()) return `<input id="x-rate" inputmode="decimal" placeholder="$ per GPU hour" value="${esc(EXP.rate)}">`;
   const ix = expIndex();
   const opt = ([k, l]) => `<button type="button" data-rp="${k}" class="${EXP.pick === k ? "on" : ""}"><span>${l}</span><b>${ix && ix.range ? usd(ix.range[k]) : "--"}</b></button>`;
   const when = ix && ix.computed_at ? new Date(ix.computed_at) : null;
@@ -390,7 +399,7 @@ function expOut() {
   return `<div class="xr"><div class="xh"><i>Rent at risk this month</i><b>${ready ? usd(rent, 0) : "--"}</b></div>
     <div class="xl"><span>If rent falls 10%</span><b>${ready ? `${usd(rent * 0.1, 0)} lost` : "--"}</b></div>
     <div class="xl"><span>If rent falls 20%</span><b>${ready ? `${usd(rent * 0.2, 0)} lost` : "--"}</b></div></div>
-    <div class="xbtn"><button class="cta" id="x-floor" ${ready && ix ? "" : "disabled"}>Floor these hours</button><a href="#" id="x-hand">Request a quote by hand</a></div>
+    <div class="xbtn"><button class="cta" id="x-floor" ${ready && (ix || HOLD()) ? "" : "disabled"}>Floor these hours</button><a href="#" id="x-hand">Request a quote by hand</a></div>
     <p class="st" id="x-st"></p>`;
 }
 function expChanged() { const o = $("#x-out"); if (o) { o.innerHTML = expOut(); bindExpOut(); } if (S.hedge.linked && S.mode === "lock") linkFloor(false); }
@@ -414,12 +423,12 @@ const CAPC = {};
 function floorPick() {
   const ix = expIndex(), n = Math.floor(Number(EXP.gpus));
   const puts = S.markets.filter((m) => m.door === "hedge" && m.status === "open" && m.underlying === "H100_SXM" && m.kind === "put" && m.model);
-  if (!ix || !puts.length || !(n > 0)) return null;
+  const base = HOLD() ? expRate() : ix && ix.range ? ix.range.mid : 0;
+  if (!(base > 0) || !puts.length || !(n > 0)) return null;
   const end = EXP.ends ? Date.parse(`${EXP.ends}T00:00:00Z`) : Date.now();
   const gap = (m) => { const a = Date.parse(`${m.windowStart}T00:00:00Z`), b = Date.parse(`${m.windowEnd}T23:59:59Z`); return end >= a && end <= b ? 0 : Math.min(Math.abs(end - a), Math.abs(end - b)); };
   const win = puts.slice().sort((x, y) => gap(x) - gap(y))[0].windowStart;
-  if (!ix.range) return null;
-  const target = Math.round(ix.range.mid * 0.9 * 100) / 100; // index Mid minus 10%
+  const target = Math.round(base * 0.9 * 100) / 100; // index Mid minus 10% (your rate minus 10% while the index is on hold)
   const m = puts.filter((x) => x.windowStart === win).reduce((p, x) => (Math.abs(x.strike - target) < Math.abs(p.strike - target) ? x : p));
   return { m, win, target, n };
 }
@@ -732,7 +741,25 @@ function rangeChart(days, { W = 1150, H = 330, R = 74, B = 30, T = 22, L = 10, a
     <path d="${mid}" fill="none" stroke="#fff" stroke-width="${axis ? 2 : 1.6}" stroke-linejoin="round" ${axis ? "" : 'vector-effect="non-scaling-stroke"'}/>
     ${axis ? `<circle cx="${X(li).toFixed(1)}" cy="${Y(pts[li].mid).toFixed(1)}" r="5" fill="#fff"/>` : ""}${xl}</svg>`;
 }
+// Index hold: chip names, the band without numbers, and which days printed. No values, no sources, no links.
+function indexHoldView() {
+  const cs = chips();
+  const g = S.index.find((x) => x.code === S.ixChip) || cs[0];
+  if (g && !IXP[g.label]) loadPrints(g.label);
+  const days = (g && IXP[g.label] && IXP[g.label].days) || [];
+  const recent = days.slice(-14).reverse().map((d) => `<tr class="${d.printed ? "" : "gap"}"><td>${day(d.day)}</td><td>${d.printed ? "Printed" : "no print"}</td></tr>`).join("");
+  return `<div class="pg">
+    <h1>Hourly Index</h1>
+    <p class="sub">USD per GPU hour, as a range across sources. One print a day per chip. Numbers are on hold until the print is public.</p>
+    <section class="win ixbig"><div class="bh"><span class="seg">${cs.map((c) => `<button data-ix="${c.code}" class="${g && c.code === g.code ? "on" : ""}">${esc(c.label)}</button>`).join("")}</span></div>
+      <div class="holdband"><div class="z"></div><div class="z"></div><div class="z"></div><div class="hb"><span>Low</span><span>Mid</span><span>High</span></div></div>
+      <div class="holdlbl"><span>Outliers dropped</span><span>The range</span><span>Outliers dropped</span></div>
+      <p class="when">Range withheld until the print is public.</p></section>
+    ${win(`Recent prints, ${g ? esc(g.label) : ""}`, `<table class="tb"><tr><th>Day</th><th>Status</th></tr>${recent || '<tr><td colspan="2">Loading.</td></tr>'}</table>`, "Daily, gaps shown", "big")}
+  </div>`;
+}
 function indexView() {
+  if (HOLD()) return indexHoldView();
   const cs = chips();
   const g = S.index.find((x) => x.code === S.ixChip) || cs[0];
   if (!g) return '<div class="pg"><h1>Hourly Index</h1></div>';
@@ -822,7 +849,7 @@ function docsView() {
     <div class="docs"><nav>${nav.map(([k, l]) => `<a href="#${k}" data-jump="${k}">${l}</a>`).join("")}</nav><div>
       <section><h2 id="tickets">Tickets<small>01</small></h2>
         <ul><li><b>Ticket:</b> a floor or a cap at a strike, for one day's print.</li><li><b>One tap:</b> the same ticket, with set amounts.</li><li><b>Lock a month:</b> a floor or a cap on a month's average, for one GPU.</li></ul>
-        <p>You pay the Premium up front. That is all you can lose. What it pays up to sits in escrow from the moment it trades.</p></section>
+        <p>You pay the Premium up front. What it pays up to sits in escrow from the moment it trades.</p></section>
       <section><h2 id="why-onchain">Why onchain<small>02</small></h2>
         <p>Sources are offchain. The print, the payout rule and the collateral are onchain and can't be changed after you pay. Every contract is fully backed in escrow, so neither side needs to trust the other.</p></section>
       <section><h2 id="the-index">The Index<small>03</small></h2>
@@ -854,10 +881,13 @@ function bindDocs() {
 // ---------- render loop ----------
 function render() {
   if (!VIEWS.includes(S.view)) S.view = "desk";
-  const views = { home: homeView, desk: deskView, index: indexView, house: houseView, docs: docsView, access: accessView };
+  document.title = S.view === "debt" ? "Hourly · Debt" : "Hourly";
+  // home and debt hold forms and a film: never rebuild them under the user
+  if ((S.view === "home" && $("#desk .site")) || (S.view === "debt" && $("#desk .debtpg"))) return;
+  const views = { home: homeView, debt: debtView, desk: deskView, index: indexView, house: houseView, docs: docsView, access: accessView };
   $("#desk").innerHTML = views[S.view]();
   document.body.dataset.view = S.view;
-  ({ home: bindHome, desk: bindDesk, index: bindIndex, house: bindHouse, docs: bindDocs, access: bindAccess })[S.view]();
+  ({ home: bindHome, debt: bindDebt, desk: bindDesk, index: bindIndex, house: bindHouse, docs: bindDocs, access: bindAccess })[S.view]();
 }
 async function refreshMarkets() {
   try { const [m, v] = await Promise.all([api("markets"), api("vaults").catch(() => [])]); S.markets = m; S.vaults = v; } catch (_) { /* keep last */ }
@@ -865,10 +895,11 @@ async function refreshMarkets() {
 async function refreshPortfolio() { if (!S.wallet) { S.portfolio = null; return; } try { S.portfolio = await api(`portfolio?owner=${S.wallet.address}`); } catch (_) { /* keep */ } }
 async function refreshActivity() { try { S.activity = await api("activity"); } catch (_) { /* keep */ } }
 window.__hourlyGo = (v, mode) => { if (mode) S.mode = mode; go(v); };
-window.addEventListener("hashchange", () => { const v = HASH[location.hash.slice(1)]; if (v && v !== S.view) { S.view = v; renderMenu(); render(); } });
+window.addEventListener("hashchange", () => { const v = HASH[location.hash.slice(1)] || (location.hash === "" && ON_DEBT ? "debt" : null); if (v && v !== S.view) { S.view = v; renderMenu(); render(); } });
 
 (async function main() {
   const rp = refParam(); if (rp) store.set("hourly.ref", rp);
+  captureRef();
   try {
     const c = JSON.parse(store.get("hourly.cleanboot") || "null");
     if (c && c.index && c.index.length) { Object.assign(S, { status: c.status, index: c.index, markets: c.markets || [], vaults: c.vaults || [], activity: c.activity }); renderMenu(); render(); }
