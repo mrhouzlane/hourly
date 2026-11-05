@@ -85,34 +85,34 @@ async function addSeat(body, ip) {
   const rec = { at: new Date().toISOString(), name: str(body && body.name, 80), company: str(body && body.company, 80), gpus: GPU_RANGES.includes(body && body.gpus) ? body.gpus : "", email: str(body && body.email, 120), show: body && body.show === true, ref: cleanRef(body && body.ref), ip: ipHash(ip) };
   const missing = [];
   if (!rec.name) missing.push("name");
-  if (!rec.company) missing.push("company");
   if (!rec.gpus) missing.push("gpus");
   if (rec.email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(rec.email)) missing.push("email");
-  if (missing.length) { const e = httpError(400, "Name, company and GPUs owned are required. Email is optional but must be valid."); e.fields = missing; throw e; }
+  if (missing.length) { const e = httpError(400, "Name and GPUs owned are required. Email is optional but must be valid."); e.fields = missing; throw e; }
   await append(F.seats, rec);
   seats.push(rec);
   // Also into the existing Request access inbox, so nothing is lost.
   await append(F.access, { at: rec.at, source: "seat", company: rec.company, email: rec.email, name: rec.name, role: "GPU owner", chips: [], gpuCount: rec.gpus, ref: rec.ref });
   return { ok: true, ...seatCount() };
 }
-// A seat is one company: repeat requests from the same company do not count twice. Never above 50.
+// A seat is one owner (company if given, else name): repeat requests do not count twice. Never above 50.
+const seatKey = (s) => (s.company || s.name).toLowerCase().replace(/\s+/g, " ");
 function seatCount() {
-  const claimed = new Set(seats.map((s) => s.company.toLowerCase().replace(/\s+/g, " "))).size;
+  const claimed = new Set(seats.map(seatKey)).size;
   return { claimed: Math.min(claimed, SEATS_TOTAL), total: SEATS_TOTAL, waitlist: Math.max(0, claimed - SEATS_TOTAL) };
 }
 
 // ---------- Hourly Founding Board ----------
-// A company is listed only if it ticked "Show my company" AND the Hourly team approved it
-// (one company name per line in state/founders-approved.txt, added with scripts/approve-founder.js).
+// An owner is listed only if they ticked "Show my name" AND the Hourly team approved them
+// (one company or name per line in state/founders-approved.txt, added with scripts/approve-founder.js).
 function approved() {
   try { return new Set(fs.readFileSync(path.join(STATE, "founders-approved.txt"), "utf8").split("\n").map((l) => l.trim().toLowerCase()).filter(Boolean)); } catch (_) { return new Set(); }
 }
 function founders() {
   const ok = approved(), seen = new Set(), rows = [];
   for (const s of seats) {
-    const k = s.company.toLowerCase().replace(/\s+/g, " ");
+    const k = seatKey(s);
     if (!s.show || !ok.has(k) || seen.has(k)) continue;
-    seen.add(k); rows.push({ company: s.company, gpus: s.gpus, day: s.at.slice(0, 10) });
+    seen.add(k); rows.push({ who: s.company || s.name, gpus: s.gpus, day: s.at.slice(0, 10) });
   }
   return { rows: rows.slice(0, SEATS_TOTAL) };
 }

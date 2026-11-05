@@ -10,25 +10,25 @@ export function siteHtml() {
     <button type="button" class="go big" id="s-open" aria-expanded="false" aria-controls="seat-form">Request a seat</button>
     <form id="seat-form" class="inline" novalidate hidden>
       <label><span>Name</span><input id="s-name" name="name" type="text" maxlength="80" required placeholder="Your name" autocomplete="name"></label>
-      <label><span>Company</span><input id="s-co" name="company" type="text" maxlength="80" required placeholder="Company or project" autocomplete="organization"></label>
+      <label><span>Company, optional</span><input id="s-co" name="company" type="text" maxlength="80" placeholder="Company or project" autocomplete="organization"></label>
       <label><span>GPUs owned</span><select id="s-gpus" name="gpus" required><option value="">Select a range</option><option>Under 64</option><option>64 to 511</option><option>512 to 4k</option><option>4k plus</option></select></label>
       <label><span>Email, optional</span><input id="s-email" name="email" type="email" maxlength="120" placeholder="you@company.com" autocomplete="email"></label>
       <button type="submit" class="go">Send request</button>
-      <label class="opt"><input id="s-show" type="checkbox"> Show my company on the Hourly Founding Board</label>
+      <label class="opt"><input id="s-show" type="checkbox"> Show my name or company on the Hourly Founding Board</label>
       <p class="err" id="s-err" role="alert"></p>
       <div class="okmsg" id="s-ok">Request received. We will be in touch.</div>
     </form>
-    <ul class="perks"><li>Priority on mainnet when it opens</li><li>Direct line to the Hourly team</li><li>Name on the Founding board</li></ul>
+    <ul class="perks"><li>Priority on mainnet when it opens</li><li>Name on the Founding board</li></ul>
     <p class="fine">Devnet beta, test money. The site stays open to everyone; seats are a perk, not a gate. Counter fills from real requests only.</p>
   </section>
   <section class="panel" id="board">
     <div class="sh"><span><span class="dots"><b></b><b></b><b></b></span>Hourly Founding Board</span><span class="r">Founding GPU Owners</span></div>
     <div class="sb">
       <table class="lb">
-        <thead><tr><th>Seat</th><th>Company</th><th>GPUs</th><th class="r">Joined</th></tr></thead>
-        <tbody id="board-rows"><tr class="none"><td colspan="4"><b>Be the first.</b> Request a seat above and tick "Show my company" to be listed here.</td></tr></tbody>
+        <thead><tr><th>Seat</th><th>Founding GPU Owner</th><th>GPUs</th><th class="r">Joined</th></tr></thead>
+        <tbody id="board-rows"><tr class="none"><td colspan="4"><b>Be the first.</b> Request a seat above and tick "Show my name" to be listed here.</td></tr></tbody>
       </table>
-      <p class="fine" style="margin:12px 0 0">Only companies that asked to be shown, listed once the Hourly team confirms them.</p>
+      <p class="fine" style="margin:12px 0 0">Only owners who asked to be shown, listed once the Hourly team confirms them.</p>
     </div>
   </section>
   </div>`;
@@ -49,7 +49,7 @@ const $ = (s, r = document) => r.querySelector(s);
 function boardHtml(rows) {
   if (!rows || !rows.length) return null;
   const e = (t) => String(t).replace(/[<>&"]/g, "");
-  return rows.map((r, i) => `<tr><td>${i + 1}</td><td>${e(r.company)}</td><td>${e(r.gpus)}</td><td class="r">${e(r.day)}</td></tr>`).join("");
+  return rows.map((r, i) => `<tr><td>${i + 1}</td><td>${e(r.who)}</td><td>${e(r.gpus)}</td><td class="r">${e(r.day)}</td></tr>`).join("");
 }
 
 // api: the v3 api() helper; go: the v3 router.
@@ -73,7 +73,7 @@ export function bindSite({ api, go }) {
     e.preventDefault();
     serr.classList.remove("open"); serr.textContent = ""; ok.classList.remove("open");
     const body = { name: $("#s-name").value.trim(), company: $("#s-co").value.trim(), gpus: $("#s-gpus").value, email: $("#s-email").value.trim(), show: $("#s-show").checked, ref };
-    if (!body.name || !body.company || !body.gpus) { serr.textContent = "Name, company and GPUs owned are required."; serr.classList.add("open"); return; }
+    if (!body.name || !body.gpus) { serr.textContent = "Name and GPUs owned are required."; serr.classList.add("open"); return; }
     try { await api("seats", body); ok.classList.add("open"); sf.reset(); count(); }
     catch (e2) { serr.textContent = e2.message; serr.classList.add("open"); }
   });
